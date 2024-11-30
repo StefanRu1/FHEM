@@ -69,6 +69,9 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 
 ##############################################################################
 #   Changelog:
+#	2024-11-30  HK1_Betriebsart:active,standby  + heating,dhw,dhwAndHeating,forcedReduced,forcedNormal
+#				Mehr Readings siehe https://forum.fhem.de/index.php?msg=1326591
+#				If setter is called with ok, also set the value in the reading
 #	2024-11-16	Änderungen für Hybrid Anlagen mit 2 Gateways und eigenem Mapping der Werte.
 #				Mehrere Gateways werden abgefragt.
 #				Die Readings oder gedumpen Files haben als Suffix die Gateway Serial.
@@ -325,6 +328,7 @@ my $RequestList = {
 	"heating.sensors.temperature.outside.unit"					=> "Temp_aussen_Einheit",
 	"heating.sensors.temperature.outside.value"					=> "Temp_aussen__C",
 
+	"heating.burners.enabled"									=> "Brenner_1_enabled",
 	"heating.burners.0.active"									=> "Brenner_1_aktiv",
 	"heating.burners.0.statistics.starts"						=> "Brenner_1_Starts",
 	"heating.burners.0.statistics.hours"						=> "Brenner_1_Betriebsstunden__h",
@@ -346,6 +350,7 @@ my $RequestList = {
 
 	"heating.circuits.enabled"									=> "aktive_Heizkreise",
 	"heating.circuits.0.name"									=> "HK1_Name",
+	"heating.circuits.0.name.name"								=> "HK1_Name_Name",
 	"heating.circuits.0.operating.modes.active.value"			=> "HK1_Betriebsart",
 	"heating.circuits.0.active"									=> "HK1_aktiv",
 	"heating.circuits.0.type"									=> "HK1_Typ",
@@ -361,6 +366,8 @@ my $RequestList = {
 	"heating.circuits.0.heating.schedule.entries"				=> "HK1_Zeitsteuerung_Heizung",
 
     "heating.circuits.0.operating.modes.dhwAndHeatingCooling.active"	=> "HK1_WW_und_Heizen_Kuehlen_aktiv",
+    "heating.circuits.0.operating.modes.dhwAndHeating.active"			=> "HK1_WW_und_Heizen_aktiv",
+    "heating.circuits.0.operating.modes.dhw.active"						=> "HK1_WW_aktiv",
     "heating.circuits.0.operating.modes.forcedNormal.active"			=> "HK1_Soll_Temp_erzwungen",
     "heating.circuits.0.operating.modes.forcedReduced.active"			=> "HK1_Reduzierte_Temp_erzwungen",
     "heating.circuits.0.operating.modes.heating.active"					=> "HK1_heizen_aktiv",
@@ -820,7 +827,11 @@ my $RequestList = {
     "heating.solar.power.production.day"   => "Solarproduktion/Tag",
     "heating.solar.power.production.unit"  => "Solarproduktion/Einheit",
     "heating.solar.power.production.week"  => "Solarproduktion/Woche",
-    "heating.solar.power.production.year"  => "Solarproduktion/Jahr"
+    "heating.solar.power.production.year"  => "Solarproduktion/Jahr",
+    "heating.solar.power.production.dayValueReadAt"  => "Solarproduktion_Tageswert_geslesen_am",
+    "heating.solar.power.production.monthValueReadAt" => "Solarproduktion_Monatswert_geslesen_am",
+    "heating.solar.power.production.weekValueReadAt" => "Solarproduktion_Wochenwert_geslesen_am",
+    "heating.solar.power.production.yearValueReadAt" => "Solarproduktion_Jahresswert_geslesen_am",
 };
 
 #####################################################################################################################
@@ -1627,7 +1638,7 @@ sub vitoconnect_Set {
 			."HK1_Urlaub_Start_Zeit "
 			."HK1_Urlaub_Ende_Zeit "
 			."HK1_Urlaub_stop:noArg "
-			."HK1_Betriebsart:active,standby "
+			."HK1_Betriebsart:active,standby,heating,dhw,dhwAndHeating,forcedReduced,forcedNormal "
 			."HK1_Soll_Temp_comfort_aktiv:activate,deactivate "
 			."HK1_Soll_Temp_comfort:slider,4,1,37 "
 			."HK1_Soll_Temp_eco_aktiv:activate,deactivate "
@@ -2645,14 +2656,14 @@ sub vitoconnect_getResourceCallback {
                     Log3($name, 5, "$name - $Reading: $Result ($Type)");
                 }
                 else {
-					readingsBulkUpdate($hash,$Reading,$Value,1);
+					readingsBulkUpdate($hash,$Reading,$Value);
                     Log3 $name, 5, "$name - $Reading: $Value ($Type)";
 					#Log3 $name, 1, "$name - $Reading: $Value ($Type)";
 				}
 			}
 		}
 		readingsBulkUpdate($hash,"state","last update: ".TimeNow()."");	# Reading 'state'
-		readingsEndUpdate( $hash,1);	# Readings schreiben
+		readingsEndUpdate( $hash, 1 );	# Readings schreiben
     }
     else {
 		Log3($name,1,$name." - An error occured: ".$err);
@@ -2724,7 +2735,7 @@ sub vitoconnect_action {
 	my $decode_json = eval {decode_json($msg)};
 
 	Log3($name,1,$name.", vitoconnect_action call finished err:" .$err);
-	my $Text = join(',',@args);	# Befehlsparameter in Text
+	my $Text = join(' ',@args);	# Befehlsparameter in Text
 	if ($err ne "" || $decode_json->{statusCode} ne "")					{	# Fehler bei Befehlsausführung
 		readingsSingleUpdate($hash,"Aktion_Status","Fehler: ".$opt." ".$Text,1);	# Reading 'Aktion_Status' setzen
 		Log3($name,1,$name.",vitoconnect_action: set ".$name." ".$opt." ".@args.", Fehler bei Befehlsausfuehrung: ".$err." :: ".$msg);
@@ -2735,7 +2746,8 @@ sub vitoconnect_action {
 	}
 	else																{	# Befehl korrekt ausgeführt
 		readingsSingleUpdate($hash,"Aktion_Status","OK: ".$opt." ".$Text,1);	# Reading 'Aktion_Status' setzen
-		Log3($name,3,$name.",vitoconnect_action: set ".$name." ".$opt." ".@args.", korrekt ausgefuehrt");
+		readingsSingleUpdate($hash,$opt,$Text,1);	# Reading updaten
+		Log3($name,3,$name.",vitoconnect_action: set ".$name." ".$opt." ".$Text.", korrekt ausgefuehrt");
 	}
 	return;
 }
