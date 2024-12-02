@@ -72,6 +72,9 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 
 ##############################################################################
 #   Changelog:
+#	2024-12-02	Day power readings werden nun unter .asSingleValue gespeichert.
+#				Die Daten kommen von der API nur sporatisch, erst nach mehreren Tagen.
+#				Diese Funktion trägt sie nach und man kann so Graphen malen.
 #	2024-12-01	Statisches Mapping von SVN übernommen.
 #				Bug bei Fehlerbehandlung von vitoconnect_action behoben
 #				Parmeter vitoconnect_mapping_roger um Rogers mapping zu benutzen
@@ -3787,7 +3790,7 @@ sub vitoconnect_getResourceCallback {
 				
 				# Store power readings as asSingleValue
 				if ($Reading =~ m/dayValueReadAt$/) {
-					Log(1,$name.", -call setpower $Reading");
+				 Log(5,$name.", -call setpower $Reading");
 				 vitoconnect_getPowerLast ($hash,$name,$Reading);
 				}
 			}
@@ -3843,7 +3846,7 @@ sub vitoconnect_getPowerLast {
 
 		my $readingDate = $current_date->ymd . " 23:59:59";
 		my $readingTS = time_str2num($readingDate);
-		Log(1,$name.", -setpower: date $readingDate lastdate $readingLastTimestamp");
+		Log(5,$name.", -setpower: date $readingDate lastdate $readingLastTimestamp");
 		if ($readingTS > $lastTS) {
 		 readingsBulkUpdate ($hash, $Reading.".day.asSingleValue", $values[$i], undef, $readingDate);
 		 Log(4,$name.", -setpower: readingsBulkUpdate ($hash, $Reading.day.asSingleValue, $values[$i], undef, $readingDate");
