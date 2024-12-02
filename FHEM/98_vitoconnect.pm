@@ -31,7 +31,9 @@ sub vitoconnect_Initialize;		# Modul initialisieren und Namen zusätzlicher Funk
 sub vitoconnect_Define;			# wird beim 'define' eines Gerätes aufgerufen
 sub vitoconnect_Undef;			# wird beim Löschen einer Geräteinstanz aufgerufen
 sub vitoconnect_Get;			# bisher kein 'get' implementiert
-sub vitoconnect_Set;			# Implementierung set-Befehle
+sub vitoconnect_Set_New;		# Implementierung set-Befehle New dynamisch auf raw readings
+sub vitoconnect_Set;			# Implementierung set-Befehle SVN
+sub vitoconnect_Set_Roger;		# Implementierung set-Befehle Roger
 sub vitoconnect_Attr;			# Attribute setzen/ändern/löschen
 
 sub vitoconnect_GetUpdate;		# Abfrage aller Werte starten
@@ -61,6 +63,7 @@ sub vitoconnect_errorHandling; 			# Errors bearbeiten für alle Calls
 sub vitoconnect_getResource_per_gw;		# 
 sub vitoconnect_getResource;			# 
 sub vitoconnect_getResourceCallback;	# 
+sub vitoconnect_getPowerLast;		# Write the power reading of the full last day to the DB
 
 sub vitoconnect_action;					# 
 
@@ -69,7 +72,12 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 
 ##############################################################################
 #   Changelog:
-#	2024-11-30  HK1_Betriebsart:active,standby  + heating,dhw,dhwAndHeating,forcedReduced,forcedNormal
+#	2024-12-01	Statisches Mapping von SVN übernommen.
+#				Bug bei Fehlerbehandlung von vitoconnect_action behoben
+#				Parmeter vitoconnect_mapping_roger um Rogers mapping zu benutzen
+#				RequestLists aufgespalten nach SVN und Roger
+#				neue sub vitoconnect_Set_Roger
+#	2024-11-30	HK1_Betriebsart:active,standby  + heating,dhw,dhwAndHeating,forcedReduced,forcedNormal
 #				Mehr Readings siehe https://forum.fhem.de/index.php?msg=1326591
 #				If setter is called with ok, also set the value in the reading
 #	2024-11-16	Änderungen für Hybrid Anlagen mit 2 Gateways und eigenem Mapping der Werte.
@@ -295,6 +303,7 @@ use Path::Tiny;
 use DateTime;
 use Time::Piece;
 use Time::Seconds;
+use Time::Piece;
 
 my $client_secret = "2e21faa1-db2c-4d0b-a10f-575fd372bc8c-575fd372bc8c";
 my $callback_uri  = "http://localhost:4200/";
@@ -309,7 +318,601 @@ my $Response;           # Gespeicherts JSON um dynamische Setter zu erstellen
 
 
 # Feste Readings, orignal Verhalten des Moduls, können über RequestListMapping oder translations überschrieben werden.
-my $RequestList = {
+# letzte SVN Version vor meinen Änderungen am 2024-11-16 oder letzte Version von Roger vom 8. November (https://forum.fhem.de/index.php?msg=1292441).
+my $RequestListSvn = {
+    "heating.boiler.serial.value"      => "Kessel_Seriennummer",
+    "heating.boiler.temperature.value" => "Kessel_Solltemperatur",
+    "heating.boiler.sensors.temperature.commonSupply.status" =>
+      "Kessel_Common_Supply",
+    "heating.boiler.sensors.temperature.commonSupply.unit" =>
+      "Kessel_Common_Supply_Temperatur/Einheit",
+    "heating.boiler.sensors.temperature.commonSupply.value" =>
+      "Kessel_Common_Supply_Temperatur",
+    "heating.boiler.sensors.temperature.main.status" => "Kessel_Status",
+    "heating.boiler.sensors.temperature.main.unit" =>
+      "Kesseltemperatur/Einheit",
+    "heating.boiler.sensors.temperature.main.value" => "Kesseltemperatur",
+    "heating.boiler.temperature.unit" => "Kesseltemperatur/Einheit",
+
+    "heating.burner.active"              => "Brenner_aktiv",
+    "heating.burner.automatic.status"    => "Brenner_Status",
+    "heating.burner.automatic.errorCode" => "Brenner_Fehlercode",
+    "heating.burner.current.power.value" => "Brenner_Leistung",
+    "heating.burner.modulation.value"    => "Brenner_Modulation",
+    "heating.burner.statistics.hours"    => "Brenner_Betriebsstunden",
+    "heating.burner.statistics.starts"   => "Brenner_Starts",
+
+    "heating.burners.0.active"            => "Brenner_1_aktiv",
+    "heating.burners.0.modulation.unit"   => "Brenner_1_Modulation/Einheit",
+    "heating.burners.0.modulation.value"  => "Brenner_1_Modulation",
+    "heating.burners.0.statistics.hours"  => "Brenner_1_Betriebsstunden",
+    "heating.burners.0.statistics.starts" => "Brenner_1_Starts",
+
+    "heating.circuits.enabled"                   => "Aktive_Heizkreise",
+    "heating.circuits.0.active"                  => "HK1-aktiv",
+    "heating.circuits.0.type"                    => "HK1-Typ",
+    "heating.circuits.0.circulation.pump.status" => "HK1-Zirkulationspumpe",
+    "heating.circuits.0.circulation.schedule.active" =>
+      "HK1-Zeitsteuerung_Zirkulation_aktiv",
+    "heating.circuits.0.circulation.schedule.entries" =>
+      "HK1-Zeitsteuerung_Zirkulation",
+    "heating.circuits.0.frostprotection.status" => "HK1-Frostschutz_Status",
+    "heating.circuits.0.geofencing.active"      => "HK1-Geofencing",
+    "heating.circuits.0.geofencing.status"      => "HK1-Geofencing_Status",
+    "heating.circuits.0.heating.curve.shift"    => "HK1-Heizkurve-Niveau",
+    "heating.circuits.0.heating.curve.slope"    => "HK1-Heizkurve-Steigung",
+    "heating.circuits.0.heating.schedule.active" =>
+      "HK1-Zeitsteuerung_Heizung_aktiv",
+    "heating.circuits.0.heating.schedule.entries" =>
+      "HK1-Zeitsteuerung_Heizung",
+    "heating.circuits.0.name"                         => "HK1-Name",
+    "heating.circuits.0.operating.modes.active.value" => "HK1-Betriebsart",
+    "heating.circuits.0.operating.modes.dhw.active"   => "HK1-WW_aktiv",
+    "heating.circuits.0.operating.modes.dhwAndHeating.active" =>
+      "HK1-WW_und_Heizen_aktiv",
+    "heating.circuits.0.operating.modes.dhwAndHeatingCooling.active" =>
+      "HK1-WW_und_Heizen_Kuehlen_aktiv",
+    "heating.circuits.0.operating.modes.forcedNormal.active" =>
+      "HK1-Solltemperatur_erzwungen",
+    "heating.circuits.0.operating.modes.forcedReduced.active" =>
+      "HK1-Reduzierte_Temperatur_erzwungen",
+    "heating.circuits.0.operating.modes.heating.active" => "HK1-heizen_aktiv",
+    "heating.circuits.0.operating.modes.normalStandby.active" =>
+      "HK1-Normal_Standby_aktiv",
+    "heating.circuits.0.operating.modes.standby.active" => "HK1-Standby_aktiv",
+    "heating.circuits.0.operating.programs.active.value" =>
+      "HK1-Programmstatus",
+    "heating.circuits.0.operating.programs.comfort.active" =>
+      "HK1-Solltemperatur_comfort_aktiv",
+    "heating.circuits.0.operating.programs.comfort.demand" =>
+      "HK1-Solltemperatur_comfort_Anforderung",
+    "heating.circuits.0.operating.programs.comfort.temperature" =>
+      "HK1-Solltemperatur_comfort",
+    "heating.circuits.0.operating.programs.eco.active" =>
+      "HK1-Solltemperatur_eco_aktiv",
+    "heating.circuits.0.operating.programs.eco.temperature" =>
+      "HK1-Solltemperatur_eco",
+    "heating.circuits.0.operating.programs.external.active" =>
+      "HK1-External_aktiv",
+    "heating.circuits.0.operating.programs.external.temperature" =>
+      "HK1-External_Temperatur",
+    "heating.circuits.0.operating.programs.fixed.active" => "HK1-Fixed_aktiv",
+    "heating.circuits.0.operating.programs.forcedLastFromSchedule.active" =>
+      "HK1-forcedLastFromSchedule_aktiv",
+    "heating.circuits.0.operating.programs.holidayAtHome.active" =>
+      "HK1-HolidayAtHome_aktiv",
+    "heating.circuits.0.operating.programs.holidayAtHome.end" =>
+      "HK1-HolidayAtHome_Ende",
+    "heating.circuits.0.operating.programs.holidayAtHome.start" =>
+      "HK1-HolidayAtHome_Start",
+    "heating.circuits.0.operating.programs.holiday.active" =>
+      "HK1-Urlaub_aktiv",
+    "heating.circuits.0.operating.programs.holiday.start" => "HK1-Urlaub_Start",
+    "heating.circuits.0.operating.programs.holiday.end"   => "HK1-Urlaub_Ende",
+    "heating.circuits.0.operating.programs.normal.active" =>
+      "HK1-Solltemperatur_aktiv",
+    "heating.circuits.0.operating.programs.normal.demand" =>
+      "HK1-Solltemperatur_Anforderung",
+    "heating.circuits.0.operating.programs.normal.temperature" =>
+      "HK1-Solltemperatur_normal",
+    "heating.circuits.0.operating.programs.reduced.active" =>
+      "HK1-Solltemperatur_reduziert_aktiv",
+    "heating.circuits.0.operating.programs.reduced.demand" =>
+      "HK1-Solltemperatur_reduziert_Anforderung",
+    "heating.circuits.0.operating.programs.reduced.temperature" =>
+      "HK1-Solltemperatur_reduziert",
+    "heating.circuits.0.operating.programs.summerEco.active" =>
+      "HK1-Solltemperatur_SummerEco_aktiv",
+    "heating.circuits.0.operating.programs.standby.active" =>
+      "HK1-Standby_aktiv",
+    "heating.circuits.0.zone.mode.active" => "HK1-ZoneMode_aktive",
+    "heating.circuits.0.sensors.temperature.room.status" => "HK1-Raum_Status",
+    "heating.circuits.0.sensors.temperature.room.value" =>
+      "HK1-Raum_Temperatur",
+    "heating.circuits.0.sensors.temperature.supply.status" =>
+      "HK1-Vorlauftemperatur_aktiv",
+    "heating.circuits.0.sensors.temperature.supply.unit" =>
+      "HK1-Vorlauftemperatur/Einheit",
+    "heating.circuits.0.sensors.temperature.supply.value" =>
+      "HK1-Vorlauftemperatur",
+    "heating.circuits.0.zone.mode.active" => "HK1-ZoneMode_aktive",
+
+    "heating.circuits.1.active"                  => "HK2-aktiv",
+    "heating.circuits.1.type"                    => "HK2-Typ",
+    "heating.circuits.1.circulation.pump.status" => "HK2-Zirkulationspumpe",
+    "heating.circuits.1.circulation.schedule.active" =>
+      "HK2-Zeitsteuerung_Zirkulation_aktiv",
+    "heating.circuits.1.circulation.schedule.entries" =>
+      "HK2-Zeitsteuerung_Zirkulation",
+    "heating.circuits.1.frostprotection.status" => "HK2-Frostschutz_Status",
+    "heating.circuits.1.geofencing.active"      => "HK2-Geofencing",
+    "heating.circuits.1.geofencing.status"      => "HK2-Geofencing_Status",
+    "heating.circuits.1.heating.curve.shift"    => "HK2-Heizkurve-Niveau",
+    "heating.circuits.1.heating.curve.slope"    => "HK2-Heizkurve-Steigung",
+    "heating.circuits.1.heating.schedule.active" =>
+      "HK2-Zeitsteuerung_Heizung_aktiv",
+    "heating.circuits.1.heating.schedule.entries" =>
+      "HK2-Zeitsteuerung_Heizung",
+    "heating.circuits.1.name"                         => "HK2-Name",
+    "heating.circuits.1.operating.modes.active.value" => "HK2-Betriebsart",
+    "heating.circuits.1.operating.modes.dhw.active"   => "HK2-WW_aktiv",
+    "heating.circuits.1.operating.modes.dhwAndHeating.active" =>
+      "HK2-WW_und_Heizen_aktiv",
+    "heating.circuits.1.operating.modes.dhwAndHeatingCooling.active" =>
+      "HK2-WW_und_Heizen_Kuehlen_aktiv",
+    "heating.circuits.1.operating.modes.forcedNormal.active" =>
+      "HK2-Solltemperatur_erzwungen",
+    "heating.circuits.1.operating.modes.forcedReduced.active" =>
+      "HK2-Reduzierte_Temperatur_erzwungen",
+    "heating.circuits.1.operating.modes.heating.active" => "HK2-heizen_aktiv",
+    "heating.circuits.1.operating.modes.normalStandby.active" =>
+      "HK2-Normal_Standby_aktiv",
+    "heating.circuits.1.operating.modes.standby.active" => "HK2-Standby_aktiv",
+    "heating.circuits.1.operating.programs.active.value" =>
+      "HK2-Programmstatus",
+    "heating.circuits.1.operating.programs.comfort.active" =>
+      "HK2-Solltemperatur_comfort_aktiv",
+    "heating.circuits.1.operating.programs.comfort.demand" =>
+      "HK2-Solltemperatur_comfort_Anforderung",
+    "heating.circuits.1.operating.programs.comfort.temperature" =>
+      "HK2-Solltemperatur_comfort",
+    "heating.circuits.1.operating.programs.eco.active" =>
+      "HK2-Solltemperatur_eco_aktiv",
+    "heating.circuits.1.operating.programs.eco.temperature" =>
+      "HK2-Solltemperatur_eco",
+    "heating.circuits.1.operating.programs.external.active" =>
+      "HK2-External_aktiv",
+    "heating.circuits.1.operating.programs.external.temperature" =>
+      "HK2-External_Temperatur",
+    "heating.circuits.1.operating.programs.fixed.active" => "HK2-Fixed_aktiv",
+    "heating.circuits.1.operating.programs.forcedLastFromSchedule.active" =>
+      "HK2-forcedLastFromSchedule_aktiv",
+    "heating.circuits.1.operating.programs.holidayAtHome.active" =>
+      "HK2-HolidayAtHome_aktiv",
+    "heating.circuits.1.operating.programs.holidayAtHome.end" =>
+      "HK2-HolidayAtHome_Ende",
+    "heating.circuits.1.operating.programs.holidayAtHome.start" =>
+      "HK2-HolidayAtHome_Start",
+    "heating.circuits.1.operating.programs.holiday.active" =>
+      "HK2-Urlaub_aktiv",
+    "heating.circuits.1.operating.programs.holiday.start" => "HK2-Urlaub_Start",
+    "heating.circuits.1.operating.programs.holiday.end"   => "HK2-Urlaub_Ende",
+    "heating.circuits.1.operating.programs.normal.active" =>
+      "HK2-Solltemperatur_aktiv",
+    "heating.circuits.1.operating.programs.normal.demand" =>
+      "HK2-Solltemperatur_Anforderung",
+    "heating.circuits.1.operating.programs.normal.temperature" =>
+      "HK2-Solltemperatur_normal",
+    "heating.circuits.1.operating.programs.reduced.active" =>
+      "HK2-Solltemperatur_reduziert_aktiv",
+    "heating.circuits.1.operating.programs.reduced.demand" =>
+      "HK2-Solltemperatur_reduziert_Anforderung",
+    "heating.circuits.1.operating.programs.reduced.temperature" =>
+      "HK2-Solltemperatur_reduziert",
+    "heating.circuits.1.operating.programs.summerEco.active" =>
+      "HK2-Solltemperatur_SummerEco_aktiv",
+    "heating.circuits.1.operating.programs.standby.active" =>
+      "HK2-Standby_aktiv",
+    "heating.circuits.1.sensors.temperature.room.status" => "HK2-Raum_Status",
+    "heating.circuits.1.sensors.temperature.room.value" =>
+      "HK2-Raum_Temperatur",
+    "heating.circuits.1.sensors.temperature.supply.status" =>
+      "HK2-Vorlauftemperatur_aktiv",
+    "heating.circuits.1.sensors.temperature.supply.unit" =>
+      "HK2-Vorlauftemperatur/Einheit",
+    "heating.circuits.1.sensors.temperature.supply.value" =>
+      "HK2-Vorlauftemperatur",
+    "heating.circuits.1.zone.mode.active" => "HK2-ZoneMode_aktive",
+
+    "heating.circuits.2.active"                  => "HK3-aktiv",
+    "heating.circuits.2.type"                    => "HK3-Typ",
+    "heating.circuits.2.circulation.pump.status" => "HK3-Zirkulationspumpe",
+    "heating.circuits.2.circulation.schedule.active" =>
+      "HK3-Zeitsteuerung_Zirkulation_aktiv",
+    "heating.circuits.2.circulation.schedule.entries" =>
+      "HK3-Zeitsteuerung_Zirkulation",
+    "heating.circuits.2.frostprotection.status" => "HK3-Frostschutz_Status",
+    "heating.circuits.2.geofencing.active"      => "HK3-Geofencing",
+    "heating.circuits.2.geofencing.status"      => "HK3-Geofencing_Status",
+    "heating.circuits.2.heating.curve.shift"    => "HK3-Heizkurve-Niveau",
+    "heating.circuits.2.heating.curve.slope"    => "HK3-Heizkurve-Steigung",
+    "heating.circuits.2.heating.schedule.active" =>
+      "HK3-Zeitsteuerung_Heizung_aktiv",
+    "heating.circuits.2.heating.schedule.entries" =>
+      "HK3-Zeitsteuerung_Heizung",
+    "heating.circuits.2.name"                         => "HK3-Name",
+    "heating.circuits.2.operating.modes.active.value" => "HK3-Betriebsart",
+    "heating.circuits.2.operating.modes.dhw.active"   => "HK3-WW_aktiv",
+    "heating.circuits.2.operating.modes.dhwAndHeating.active" =>
+      "HK3-WW_und_Heizen_aktiv",
+    "heating.circuits.2.operating.modes.dhwAndHeatingCooling.active" =>
+      "HK3-WW_und_Heizen_Kuehlen_aktiv",
+    "heating.circuits.2.operating.modes.forcedNormal.active" =>
+      "HK3-Solltemperatur_erzwungen",
+    "heating.circuits.2.operating.modes.forcedReduced.active" =>
+      "HK3-Reduzierte_Temperatur_erzwungen",
+    "heating.circuits.2.operating.modes.heating.active" => "HK3-heizen_aktiv",
+    "heating.circuits.2.operating.modes.normalStandby.active" =>
+      "HK3-Normal_Standby_aktiv",
+    "heating.circuits.2.operating.modes.standby.active" => "HK3-Standby_aktiv",
+    "heating.circuits.2.operating.programs.active.value" =>
+      "HK3-Programmstatus",
+    "heating.circuits.2.operating.programs.comfort.active" =>
+      "HK3-Solltemperatur_comfort_aktiv",
+    "heating.circuits.2.operating.programs.comfort.demand" =>
+      "HK3-Solltemperatur_comfort_Anforderung",
+    "heating.circuits.2.operating.programs.comfort.temperature" =>
+      "HK3-Solltemperatur_comfort",
+    "heating.circuits.2.operating.programs.eco.active" =>
+      "HK3-Solltemperatur_eco_aktiv",
+    "heating.circuits.2.operating.programs.eco.temperature" =>
+      "HK3-Solltemperatur_eco",
+    "heating.circuits.2.operating.programs.external.active" =>
+      "HK3-External_aktiv",
+    "heating.circuits.2.operating.programs.external.temperature" =>
+      "HK3-External_Temperatur",
+    "heating.circuits.2.operating.programs.fixed.active" => "HK3-Fixed_aktiv",
+    "heating.circuits.2.operating.programs.forcedLastFromSchedule.active" =>
+      "HK3-forcedLastFromSchedule_aktiv",
+    "heating.circuits.2.operating.programs.holidayAtHome.active" =>
+      "HK3-HolidayAtHome_aktiv",
+    "heating.circuits.2.operating.programs.holidayAtHome.end" =>
+      "HK3-HolidayAtHome_Ende",
+    "heating.circuits.2.operating.programs.holidayAtHome.start" =>
+      "HK3-HolidayAtHome_Start",
+    "heating.circuits.2.operating.programs.holiday.active" =>
+      "HK3-Urlaub_aktiv",
+    "heating.circuits.2.operating.programs.holiday.start" => "HK3-Urlaub_Start",
+    "heating.circuits.2.operating.programs.holiday.end"   => "HK3-Urlaub_Ende",
+    "heating.circuits.2.operating.programs.normal.active" =>
+      "HK3-Solltemperatur_aktiv",
+    "heating.circuits.2.operating.programs.normal.demand" =>
+      "HK3-Solltemperatur_Anforderung",
+    "heating.circuits.2.operating.programs.normal.temperature" =>
+      "HK3-Solltemperatur_normal",
+    "heating.circuits.2.operating.programs.reduced.active" =>
+      "HK3-Solltemperatur_reduziert_aktiv",
+    "heating.circuits.2.operating.programs.reduced.demand" =>
+      "HK3-Solltemperatur_reduziert_Anforderung",
+    "heating.circuits.2.operating.programs.reduced.temperature" =>
+      "HK3-Solltemperatur_reduziert",
+    "heating.circuits.2.operating.programs.summerEco.active" =>
+      "HK3-Solltemperatur_SummerEco_aktiv",
+    "heating.circuits.2.operating.programs.standby.active" =>
+      "HK3-Standby_aktiv",
+    "heating.circuits.2.sensors.temperature.room.status" => "HK3-Raum_Status",
+    "heating.circuits.2.sensors.temperature.room.value" =>
+      "HK3-Raum_Temperatur",
+    "heating.circuits.2.sensors.temperature.supply.status" =>
+      "HK3-Vorlauftemperatur_aktiv",
+    "heating.circuits.2.sensors.temperature.supply.unit" =>
+      "HK3-Vorlauftemperatur/Einheit",
+    "heating.circuits.2.sensors.temperature.supply.value" =>
+      "HK3-Vorlauftemperatur",
+    "heating.circuits.2.zone.mode.active" => "HK2-ZoneMode_aktive",
+
+    "heating.circuits.3.geofencing.active" => "HK4-Geofencing",
+    "heating.circuits.3.geofencing.status" => "HK4-Geofencing_Status",
+    "heating.circuits.3.operating.programs.summerEco.active" =>
+      "HK4-Solltemperatur_SummerEco_aktiv",
+    "heating.circuits.3.zone.mode.active" => "HK4-ZoneMode_aktive",
+
+    "heating.compressor.active"                     => "Kompressor_aktiv",
+    "heating.configuration.multiFamilyHouse.active" => "Mehrfamilenhaus_aktiv",
+    "heating.configuration.regulation.mode"         => "Regulationmode",
+    "heating.controller.serial.value"  => "Controller_Seriennummer",
+    "heating.device.time.offset.value" => "Device_Time_Offset",
+    "heating.dhw.active"               => "WW-aktiv",
+    "heating.dhw.status"               => "WW-Status",
+    "heating.dhw.charging.active"      => "WW-Aufladung",
+
+    "heating.dhw.charging.level.bottom" => "WW-Speichertemperatur_unten",
+    "heating.dhw.charging.level.middle" => "WW-Speichertemperatur_mitte",
+    "heating.dhw.charging.level.top"    => "WW-Speichertemperatur_oben",
+    "heating.dhw.charging.level.value"  => "WW-Speicherladung",
+
+    "heating.dhw.oneTimeCharge.active" => "WW-einmaliges_Aufladen",
+    "heating.dhw.pumps.circulation.schedule.active" =>
+      "WW-Zirkulationspumpe_Zeitsteuerung_aktiv",
+    "heating.dhw.pumps.circulation.schedule.entries" =>
+      "WW-Zirkulationspumpe_Zeitplan",
+    "heating.dhw.pumps.circulation.status" => "WW-Zirkulationspumpe_Status",
+    "heating.dhw.pumps.primary.status"     => "WW-Zirkulationspumpe_primaer",
+    "heating.dhw.sensors.temperature.outlet.status" =>
+      "WW-Sensoren_Auslauf_Status",
+    "heating.dhw.sensors.temperature.outlet.unit" =>
+      "WW-Sensoren_Auslauf_Wert/Einheit",
+    "heating.dhw.sensors.temperature.outlet.value" =>
+      "WW-Sensoren_Auslauf_Wert",
+    "heating.dhw.temperature.main.value"       => "WW-Haupttemperatur",
+    "heating.dhw.temperature.hysteresis.value" => "WW-Hysterese",
+    "heating.dhw.temperature.temp2.value"      => "WW-Temperatur_2",
+    "heating.dhw.sensors.temperature.hotWaterStorage.status" =>
+      "WW-Temperatur_aktiv",
+    "heating.dhw.sensors.temperature.hotWaterStorage.unit" =>
+      "WW-Isttemperatur/Einheit",
+    "heating.dhw.sensors.temperature.hotWaterStorage.value" =>
+      "WW-Isttemperatur",
+    "heating.dhw.temperature.value" => "WW-Solltemperatur",
+    "heating.dhw.schedule.active"   => "WW-zeitgesteuert_aktiv",
+    "heating.dhw.schedule.entries"  => "WW-Zeitplan",
+
+    "heating.errors.active.entries"  => "Fehlereintraege_aktive",
+    "heating.errors.history.entries" => "Fehlereintraege_Historie",
+
+    "heating.flue.sensors.temperature.main.status" => "Abgassensor_Status",
+    "heating.flue.sensors.temperature.main.unit" =>
+      "Abgassensor_Temperatur/Einheit",
+    "heating.flue.sensors.temperature.main.value" => "Abgassensor_Temperatur",
+
+    "heating.fuelCell.operating.modes.active.value" => "Brennstoffzelle_Mode",
+    "heating.fuelCell.operating.modes.ecological.active" =>
+      "Brennstoffzelle_Mode_Ecological",
+    "heating.fuelCell.operating.modes.economical.active" =>
+      "Brennstoffzelle_Mode_Economical",
+    "heating.fuelCell.operating.modes.heatControlled.active" =>
+      "Brennstoffzelle_wärmegesteuert",
+    "heating.fuelCell.operating.modes.maintenance.active" =>
+      "Brennstoffzelle_Wartung",
+    "heating.fuelCell.operating.modes.standby.active" =>
+      "Brennstoffzelle_Standby",
+    "heating.fuelCell.operating.phase.value" => "Brennstoffzelle_Phase",
+    "heating.fuelCell.power.production.day" =>
+      "Brennstoffzelle_Stromproduktion/Tag",
+    "heating.fuelCell.power.production.month" =>
+      "Brennstoffzelle_Stromproduktion/Monat",
+    "heating.fuelCell.power.production.unit" =>
+      "Brennstoffzelle_Stromproduktion/Einheit",
+    "heating.fuelCell.power.production.week" =>
+      "Brennstoffzelle_Stromproduktion/Woche",
+    "heating.fuelCell.power.production.year" =>
+      "Brennstoffzelle_Stromproduktion/Jahr",
+    "heating.fuelCell.sensors.temperature.return.status" =>
+      "Brennstoffzelle_Temperatur_Ruecklauf_Status",
+    "heating.fuelCell.sensors.temperature.return.unit" =>
+      "Brennstoffzelle_Temperatur_Ruecklauf/Einheit",
+    "heating.fuelCell.sensors.temperature.return.value" =>
+      "Brennstoffzelle_Temperatur_Ruecklauf",
+    "heating.fuelCell.sensors.temperature.supply.status" =>
+      "Brennstoffzelle_Temperatur_Vorlauf_Status",
+    "heating.fuelCell.sensors.temperature.supply.unit" =>
+      "Brennstoffzelle_Temperatur_Vorlauf/Einheit",
+    "heating.fuelCell.sensors.temperature.supply.value" =>
+      "Brennstoffzelle_Temperatur_Vorlauf",
+    "heating.fuelCell.statistics.availabilityRate" =>
+      "Brennstoffzelle_Statistic_Verfügbarkeit",
+    "heating.fuelCell.statistics.insertions" =>
+      "Brennstoffzelle_Statistic_Einschub",
+    "heating.fuelCell.statistics.operationHours" =>
+      "Brennstoffzelle_Statistic_Bestriebsstunden",
+    "heating.fuelCell.statistics.productionHours" =>
+      "Brennstoffzelle_Statistic_Produktionsstunden",
+    "heating.fuelCell.statistics.productionStarts" =>
+      "Brennstoffzelle_Statistic_Produktionsstarts",
+
+    "heating.gas.consumption.dhw.day"   => "Gasverbrauch_WW/Tag",
+    "heating.gas.consumption.dhw.week"  => "Gasverbrauch_WW/Woche",
+    "heating.gas.consumption.dhw.month" => "Gasverbrauch_WW/Monat",
+    "heating.gas.consumption.dhw.year"  => "Gasverbrauch_WW/Jahr",
+    "heating.gas.consumption.dhw.dayValueReadAt" =>
+      "Gasverbrauch_WW/Tag_gelesen_am",
+    "heating.gas.consumption.dhw.weekValueReadAt" =>
+      "Gasverbrauch_WW/Woche_gelesen_am",
+    "heating.gas.consumption.dhw.monthValueReadAt" =>
+      "Gasverbrauch_WW/Monat_gelesen_am",
+    "heating.gas.consumption.dhw.yearValueReadAt" =>
+      "Gasverbrauch_WW/Jahr_gelesen_am",
+    "heating.gas.consumption.dhw.unit" => "Gasverbrauch_WW/Einheit",
+
+    "heating.gas.consumption.heating.day"   => "Gasverbrauch_Heizung/Tag",
+    "heating.gas.consumption.heating.week"  => "Gasverbrauch_Heizung/Woche",
+    "heating.gas.consumption.heating.month" => "Gasverbrauch_Heizung/Monat",
+    "heating.gas.consumption.heating.year"  => "Gasverbrauch_Heizung/Jahr",
+    "heating.gas.consumption.heating.dayValueReadAt" =>
+      "Gasverbrauch_Heizung/Tag_gelesen_am",
+    "heating.gas.consumption.heating.weekValueReadAt" =>
+      "Gasverbrauch_Heizung/Woche_gelesen_am",
+    "heating.gas.consumption.heating.monthValueReadAt" =>
+      "Gasverbrauch_Heizung/Monat_gelesen_am",
+    "heating.gas.consumption.heating.yearValueReadAt" =>
+      "Gasverbrauch_Heizung/Jahr_gelesen_am",
+    "heating.gas.consumption.heating.unit" => "Gasverbrauch_Heizung/Einheit",
+    "heating.gas.consumption.total.day"    => "Gasverbrauch_Total/Tag",
+    "heating.gas.consumption.total.month"  => "Gasverbrauch_Total/Monat",
+    "heating.gas.consumption.total.unit"   => "Gasverbrauch_Total/Einheit",
+    "heating.gas.consumption.total.week"   => "Gasverbrauch_Total/Woche",
+    "heating.gas.consumption.total.year"   => "Gasverbrauch_Total/Jahr",
+    "heating.gas.consumption.total.dayValueReadAt" =>
+      "Gasverbrauch_Total/Tag_gelesen_am",
+    "heating.gas.consumption.total.monthValueReadAt" =>
+      "Gasverbrauch_Total/Woche_gelesen_am",
+    "heating.gas.consumption.total.weekValueReadAt" =>
+      "Gasverbrauch_Total/Woche_gelesen_am",
+    "heating.gas.consumption.total.yearValueReadAt" =>
+      "Gasverbrauch_Total/Jahr_gelesen_am",
+
+    "heating.gas.consumption.fuelCell.day" =>
+      "Gasverbrauch_Brennstoffzelle/Tag",
+    "heating.gas.consumption.fuelCell.week" =>
+      "Gasverbrauch_Brennstoffzelle/Woche",
+    "heating.gas.consumption.fuelCell.month" =>
+      "Gasverbrauch_Brennstoffzelle/Monat",
+    "heating.gas.consumption.fuelCell.year" =>
+      "Gasverbrauch_Brennstoffzelle/Jahr",
+    "heating.gas.consumption.fuelCell.unit" =>
+      "Gasverbrauch_Brennstoffzelle/Einheit",
+
+    "heating.heat.production.day"   => "Wärmeproduktion/Tag",
+    "heating.heat.production.month" => "Wärmeproduktion/Woche",
+    "heating.heat.production.unit"  => "Wärmeproduktion/Einheit",
+    "heating.heat.production.week"  => "Wärmeproduktion/Woche",
+    "heating.heat.production.year"  => "Wärmeproduktion/Jahr",
+
+    "heating.operating.programs.holiday.active" => "Urlaub_aktiv",
+    "heating.operating.programs.holiday.end"    => "Urlaub_Ende",
+    "heating.operating.programs.holiday.start"  => "Urlaub_Start",
+
+    "heating.operating.programs.holidayAtHome.active" => "holidayAtHome_aktiv",
+    "heating.operating.programs.holidayAtHome.end"    => "holidayAtHome_Ende",
+    "heating.operating.programs.holidayAtHome.start"  => "holidayAtHome_Start",
+
+    "heating.power.consumption.day"   => "Stromverbrauch/Tag",
+    "heating.power.consumption.month" => "Stromverbrauch/Monat",
+    "heating.power.consumption.week"  => "Stromverbrauch/Woche",
+    "heating.power.consumption.year"  => "Stromverbrauch/Jahr",
+    "heating.power.consumption.unit"  => "Stromverbrauch/Einheit",
+
+    "heating.power.consumption.dhw.day"   => "Stromverbrauch_WW/Tag",
+    "heating.power.consumption.dhw.month" => "Stromverbrauch_WW/Monat",
+    "heating.power.consumption.dhw.week"  => "Stromverbrauch_WW/Woche",
+    "heating.power.consumption.dhw.year"  => "Stromverbrauch_WW/Jahr",
+    "heating.power.consumption.dhw.unit"  => "Stromverbrauch_WW/Einheit",
+
+    "heating.power.consumption.heating.day"   => "Stromverbrauch_Heizung/Tag",
+    "heating.power.consumption.heating.month" => "Stromverbrauch_Heizung/Monat",
+    "heating.power.consumption.heating.week"  => "Stromverbrauch_Heizung/Woche",
+    "heating.power.consumption.heating.year"  => "Stromverbrauch_Heizung/Jahr",
+    "heating.power.consumption.heating.unit" =>
+      "Stromverbrauch_Heizung/Einheit",
+
+    "heating.power.consumption.total.day"   => "Stromverbrauch_Total/Tag",
+    "heating.power.consumption.total.month" => "Stromverbrauch_Total/Monat",
+    "heating.power.consumption.total.week"  => "Stromverbrauch_Total/Woche",
+    "heating.power.consumption.total.year"  => "Stromverbrauch_Total/Jahr",
+    "heating.power.consumption.total.dayValueReadAt" =>
+      "Stromverbrauch_Total/Tag_gelesen_am",
+    "heating.power.consumption.total.monthValueReadAt" =>
+      "Stromverbrauch_Total/Monat_gelesen_am",
+    "heating.power.consumption.total.weekValueReadAt" =>
+      "Stromverbrauch_Total/Woche_gelesen_am",
+    "heating.power.consumption.total.yearValueReadAt" =>
+      "Stromverbrauch_Total/Jahr_gelesen_am",
+    "heating.power.consumption.total.unit" => "Stromverbrauch_Total/Einheit",
+
+    "heating.power.production.current.status" =>
+      "Stromproduktion_aktueller_Status",
+    "heating.power.production.current.value" => "Stromproduktion",
+
+    "heating.power.production.demandCoverage.current.unit" =>
+      "Stromproduktion_Bedarfsabdeckung/Einheit",
+    "heating.power.production.demandCoverage.current.value" =>
+      "Stromproduktion_Bedarfsabdeckung",
+    "heating.power.production.demandCoverage.total.day" =>
+      "Stromproduktion_Bedarfsabdeckung_total/Tag",
+    "heating.power.production.demandCoverage.total.month" =>
+      "Stromproduktion_Bedarfsabdeckung_total/Monat",
+    "heating.power.production.demandCoverage.total.unit" =>
+      "Stromproduktion_Bedarfsabdeckung_total/Einheit",
+    "heating.power.production.demandCoverage.total.week" =>
+      "Stromproduktion_Bedarfsabdeckung_total/Woche",
+    "heating.power.production.demandCoverage.total.year" =>
+      "Stromproduktion_Bedarfsabdeckung_total/Jahr",
+
+    "heating.power.production.day"   => "Stromproduktion_Total/Tag",
+    "heating.power.production.month" => "Stromproduktion_Total/Monat",
+    "heating.power.production.productionCoverage.current.unit" =>
+      "Stromproduktion_Produktionsabdeckung/Einheit",
+    "heating.power.production.productionCoverage.current.value" =>
+      "Stromproduktion_Produktionsabdeckung",
+    "heating.power.production.productionCoverage.total.day" =>
+      "Stromproduktion_Produktionsabdeckung_Total/Tag",
+    "heating.power.production.productionCoverage.total.month" =>
+      "Stromproduktion_Produktionsabdeckung_Total/Monat",
+    "heating.power.production.productionCoverage.total.unit" =>
+      "Stromproduktion_Produktionsabdeckung_Total/Einheit",
+    "heating.power.production.productionCoverage.total.week" =>
+      "Stromproduktion_Produktionsabdeckung_Total/Woche",
+    "heating.power.production.productionCoverage.total.year" =>
+      "Stromproduktion_Produktionsabdeckung_Total/Jahr",
+    "heating.power.production.unit" => "Stromproduktion_Total/Einheit",
+    "heating.power.production.week" => "Stromproduktion_Total/Woche",
+    "heating.power.production.year" => "Stromproduktion_Total/Jahr",
+
+    "heating.power.purchase.current.unit"  => "Stromkauf/Einheit",
+    "heating.power.purchase.current.value" => "Stromkauf",
+    "heating.power.sold.current.unit"      => "Stromverkauf/Einheit",
+    "heating.power.sold.current.value"     => "Stromverkauf",
+    "heating.power.sold.day"               => "Stromverkauf/Tag",
+    "heating.power.sold.month"             => "Stromverkauf/Monat",
+    "heating.power.sold.unit"              => "Stromverkauf/Einheit",
+    "heating.power.sold.week"              => "Stromverkauf/Woche",
+    "heating.power.sold.year"              => "Stromverkauf/Jahr",
+
+    "heating.sensors.pressure.supply.status" => "Drucksensor_Vorlauf_Status",
+    "heating.sensors.pressure.supply.unit"   => "Drucksensor_Vorlauf/Einheit",
+    "heating.sensors.pressure.supply.value"  => "Drucksensor_Vorlauf",
+
+    "heating.sensors.power.output.status" => "Sensor_Stromproduktion_Status",
+    "heating.sensors.power.output.value"  => "Sensor_Stromproduktion",
+
+    "heating.sensors.temperature.outside.status"      => "Aussen_Status",
+    "heating.sensors.temperature.outside.statusWired" => "Aussen_StatusWired",
+    "heating.sensors.temperature.outside.statusWireless" =>
+      "Aussen_StatusWireless",
+    "heating.sensors.temperature.outside.unit"  => "Aussentemperatur/Einheit",
+    "heating.sensors.temperature.outside.value" => "Aussentemperatur",
+
+    "heating.service.timeBased.serviceDue" => "Service_faellig",
+    "heating.service.timeBased.serviceIntervalMonths" =>
+      "Service_Intervall_Monate",
+    "heating.service.timeBased.activeMonthSinceLastService" =>
+      "Service_Monate_aktiv_seit_letzten_Service",
+    "heating.service.timeBased.lastService" => "Service_Letzter",
+    "heating.service.burnerBased.serviceDue" =>
+      "Service_fällig_brennerbasiert",
+    "heating.service.burnerBased.serviceIntervalBurnerHours" =>
+      "Service_Intervall_Betriebsstunden",
+    "heating.service.burnerBased.activeBurnerHoursSinceLastService" =>
+      "Service_Betriebsstunden_seit_letzten",
+    "heating.service.burnerBased.lastService" =>
+      "Service_Letzter_brennerbasiert",
+
+    "heating.solar.active"               => "Solar_aktiv",
+    "heating.solar.pumps.circuit.status" => "Solar_Pumpe_Status",
+    "heating.solar.rechargeSuppression.status" =>
+      "Solar_Aufladeunterdrueckung_Status",
+    "heating.solar.sensors.power.status" => "Solar_Sensor_Power_Status",
+    "heating.solar.sensors.power.value"  => "Solar_Sensor_Power",
+    "heating.solar.sensors.temperature.collector.status" =>
+      "Solar_Sensor_Temperatur_Kollektor_Status",
+    "heating.solar.sensors.temperature.collector.value" =>
+      "Solar_Sensor_Temperatur_Kollektor",
+    "heating.solar.sensors.temperature.dhw.status" =>
+      "Solar_Sensor_Temperatur_WW_Status",
+    "heating.solar.sensors.temperature.dhw.value" =>
+      "Solar_Sensor_Temperatur_WW",
+    "heating.solar.statistics.hours" => "Solar_Sensor_Statistik_Stunden",
+
+    "heating.solar.power.cumulativeProduced.value" =>
+      "Solarproduktion_Gesamtertrag",
+    "heating.solar.power.production.month" => "Solarproduktion/Monat",
+    "heating.solar.power.production.day"   => "Solarproduktion/Tag",
+    "heating.solar.power.production.unit"  => "Solarproduktion/Einheit",
+    "heating.solar.power.production.week"  => "Solarproduktion/Woche",
+    "heating.solar.power.production.year"  => "Solarproduktion/Jahr"
+};
+
+my $RequestListRoger = {
 	"device.serial.value"										=> "Seriennummer",
 	"device.messages.errors.raw.entries"						=> "Fehlermeldungen",
 
@@ -328,7 +931,6 @@ my $RequestList = {
 	"heating.sensors.temperature.outside.unit"					=> "Temp_aussen_Einheit",
 	"heating.sensors.temperature.outside.value"					=> "Temp_aussen__C",
 
-	"heating.burners.enabled"									=> "Brenner_1_enabled",
 	"heating.burners.0.active"									=> "Brenner_1_aktiv",
 	"heating.burners.0.statistics.starts"						=> "Brenner_1_Starts",
 	"heating.burners.0.statistics.hours"						=> "Brenner_1_Betriebsstunden__h",
@@ -350,7 +952,6 @@ my $RequestList = {
 
 	"heating.circuits.enabled"									=> "aktive_Heizkreise",
 	"heating.circuits.0.name"									=> "HK1_Name",
-	"heating.circuits.0.name.name"								=> "HK1_Name_Name",
 	"heating.circuits.0.operating.modes.active.value"			=> "HK1_Betriebsart",
 	"heating.circuits.0.active"									=> "HK1_aktiv",
 	"heating.circuits.0.type"									=> "HK1_Typ",
@@ -366,8 +967,6 @@ my $RequestList = {
 	"heating.circuits.0.heating.schedule.entries"				=> "HK1_Zeitsteuerung_Heizung",
 
     "heating.circuits.0.operating.modes.dhwAndHeatingCooling.active"	=> "HK1_WW_und_Heizen_Kuehlen_aktiv",
-    "heating.circuits.0.operating.modes.dhwAndHeating.active"			=> "HK1_WW_und_Heizen_aktiv",
-    "heating.circuits.0.operating.modes.dhw.active"						=> "HK1_WW_aktiv",
     "heating.circuits.0.operating.modes.forcedNormal.active"			=> "HK1_Soll_Temp_erzwungen",
     "heating.circuits.0.operating.modes.forcedReduced.active"			=> "HK1_Reduzierte_Temp_erzwungen",
     "heating.circuits.0.operating.modes.heating.active"					=> "HK1_heizen_aktiv",
@@ -827,11 +1426,7 @@ my $RequestList = {
     "heating.solar.power.production.day"   => "Solarproduktion/Tag",
     "heating.solar.power.production.unit"  => "Solarproduktion/Einheit",
     "heating.solar.power.production.week"  => "Solarproduktion/Woche",
-    "heating.solar.power.production.year"  => "Solarproduktion/Jahr",
-    "heating.solar.power.production.dayValueReadAt"  => "Solarproduktion_Tageswert_geslesen_am",
-    "heating.solar.power.production.monthValueReadAt" => "Solarproduktion_Monatswert_geslesen_am",
-    "heating.solar.power.production.weekValueReadAt" => "Solarproduktion_Wochenwert_geslesen_am",
-    "heating.solar.power.production.yearValueReadAt" => "Solarproduktion_Jahresswert_geslesen_am",
+    "heating.solar.power.production.year"  => "Solarproduktion/Jahr"
 };
 
 #####################################################################################################################
@@ -849,6 +1444,7 @@ sub vitoconnect_Initialize {
 		"disable:0,1 "
       . "vitoconnect_mappings:textField-long "
       . "vitoconnect_translations:textField-long "
+	  . "vitoconnect_mapping_roger:0,1 "
 # Wird nicht verwendet
 #      . "model:Vitodens_200-W_(B2HB),Vitodens_200-W_(B2KB),"
 #      . "Vitotronic_200_(HO1),Vitotronic_200_(HO1A),Vitotronic_200_(HO1B),Vitotronic_200_(HO1D),"
@@ -1148,7 +1744,535 @@ sub vitoconnect_Set {
 		#use new dynamic parsing of JSON to get raw setters
 		return vitoconnect_Set_New ($hash,$name,$opt,@args);
 	}
-	# original handling of modul
+	
+	if  (AttrVal( $name, 'vitoconnect_mapping_roger', 0 ) eq "1" ) {
+		#use new dynamic parsing of JSON to get raw setters
+		return vitoconnect_Set_Roger ($hash,$name,$opt,@args);
+	}
+	
+	# SVN mapping original handling of modul
+	return "set ".$name." needs at least one argument" unless (defined($opt) );
+
+	if    ($opt eq "update")							{	# set <name> update: update readings immeadiatlely
+		RemoveInternalTimer($hash);							# bisherigen Timer löschen
+		vitoconnect_GetUpdate($hash);						# neue Abfrage starten
+		return;
+	}
+	elsif ($opt eq "logResponseOnce" )					{	# set <name> logResponseOnce: dumps the json response of Viessmann server to entities.json, gw.json, actions.json in FHEM log directory
+		$hash->{".logResponseOnce"} = 1;					# in 'Internals' merken
+		RemoveInternalTimer($hash);							# bisherigen Timer löschen
+		vitoconnect_getCode($hash);							# Werte für: Access-Token, Install-ID, Gateway anfragen
+		return;
+	}
+	elsif ($opt eq "clearReadings" )					{	# set <name> clearReadings: clear all readings immeadiatlely
+		AnalyzeCommand($hash,"deletereading ".$name." .*");
+		return;
+	}
+	elsif ($opt eq "password" )							{	# set <name> password: store password in key store
+		my $err = vitoconnect_StoreKeyValue($hash,"passwd",$args[0]);	# Kennwort verschlüsselt speichern
+		return $err if ($err);
+		vitoconnect_getCode($hash);							# Werte für: Access-Token, Install-ID, Gateway anfragen
+		return;
+	}
+	elsif ($opt eq "apiKey" )							{	# set <name> apiKey: bisher keine Beschreibung
+		$hash->{apiKey} = $args[0];
+		my $err = vitoconnect_StoreKeyValue($hash,"apiKey",$args[0]);	# apiKey verschlüsselt speichern
+		RemoveInternalTimer($hash);
+		vitoconnect_getCode($hash);							# Werte für: Access-Token, Install-ID, Gateway anfragen
+		return;
+	}
+    elsif ( $opt eq "HK1-Heizkurve-Niveau" ) {
+        my $slope = ReadingsVal( $name, "HK1-Heizkurve-Steigung", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.0.heating.curve/commands/setCurve",
+            "{\"shift\":$args[0],\"slope\":$slope}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Heizkurve-Niveau" ) {
+        my $slope = ReadingsVal( $name, "HK2-Heizkurve-Steigung", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.1.heating.curve/commands/setCurve",
+            "{\"shift\":$args[0],\"slope\":$slope}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Heizkurve-Niveau" ) {
+        my $slope = ReadingsVal( $name, "HK3-Heizkurve-Steigung", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.2.heating.curve/commands/setCurve",
+            "{\"shift\":$args[0],\"slope\":$slope}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Heizkurve-Steigung" ) {
+        my $shift = ReadingsVal( $name, "HK1-Heizkurve-Niveau", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.0.heating.curve/commands/setCurve",
+            "{\"shift\":$shift,\"slope\":$args[0]}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Heizkurve-Steigung" ) {
+        my $shift = ReadingsVal( $name, "HK2-Heizkurve-Niveau", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.1.heating.curve/commands/setCurve",
+            "{\"shift\":$shift,\"slope\":$args[0]}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Heizkurve-Steigung" ) {
+        my $shift = ReadingsVal( $name, "HK3-Heizkurve-Niveau", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.2.heating.curve/commands/setCurve",
+            "{\"shift\":$shift,\"slope\":$args[0]}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Urlaub_Start" ) {
+        my $end = ReadingsVal( $name, "HK1-Urlaub_Ende", "" );
+        if ( $end eq "" ) {
+            my $t = Time::Piece->strptime( $args[0], "%Y-%m-%d" );
+            $t += ONE_DAY;
+            $end = $t->strftime("%Y-%m-%d");
+        }
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.0.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$args[0]\",\"end\":\"$end\"}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Urlaub_Start" ) {
+        my $end = ReadingsVal( $name, "HK2-Urlaub_Ende", "" );
+        if ( $end eq "" ) {
+            my $t = Time::Piece->strptime( $args[0], "%Y-%m-%d" );
+            $t += ONE_DAY;
+            $end = $t->strftime("%Y-%m-%d");
+        }
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.1.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$args[0]\",\"end\":\"$end\"}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Urlaub_Start" ) {
+        my $end = ReadingsVal( $name, "HK3-Urlaub_Ende", "" );
+        if ( $end eq "" ) {
+            my $t = Time::Piece->strptime( $args[0], "%Y-%m-%d" );
+            $t += ONE_DAY;
+            $end = $t->strftime("%Y-%m-%d");
+        }
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.2.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$args[0]\",\"end\":\"$end\"}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Urlaub_Ende" ) {
+        my $start = ReadingsVal( $name, "HK1-Urlaub_Start", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.0.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$start\",\"end\":\"$args[0]\"}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Urlaub_Ende" ) {
+        my $start = ReadingsVal( $name, "HK2-Urlaub_Start", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.1.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$start\",\"end\":\"$args[0]\"}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Urlaub_Ende" ) {
+        my $start = ReadingsVal( $name, "HK3-Urlaub_Start", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.2.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$start\",\"end\":\"$args[0]\"}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Urlaub_unschedule" ) {
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.0.operating.programs.holiday/commands/unschedule",
+            "{}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Urlaub_unschedule" ) {
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.1.operating.programs.holiday/commands/unschedule",
+            "{}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Urlaub_unschedule" ) {
+        vitoconnect_action(
+            $hash,
+            "heating.circuits.2.operating.programs.holiday/commands/unschedule",
+            "{}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Zeitsteuerung_Heizung" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.0.heating.schedule/commands/setSchedule",
+            "{\"newSchedule\":@args}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK2-Zeitsteuerung_Heizung" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.1.heating.schedule/commands/setSchedule",
+            "{\"newSchedule\":@args}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK3-Zeitsteuerung_Heizung" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.2.heating.schedule/commands/setSchedule",
+            "{\"newSchedule\":@args}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK1-Betriebsart" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.0.operating.modes.active/commands/setMode",
+            "{\"mode\":\"$args[0]\"}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK2-Betriebsart" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.1.operating.modes.active/commands/setMode",
+            "{\"mode\":\"$args[0]\"}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK3-Betriebsart" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.2.operating.modes.active/commands/setMode",
+            "{\"mode\":\"$args[0]\"}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK1-Solltemperatur_comfort_aktiv" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.0.operating.programs.comfort/commands/$args[0]",
+            "{}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK2-Solltemperatur_comfort_aktiv" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.1.operating.programs.comfort/commands/$args[0]",
+            "{}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK3-Solltemperatur_comfort_aktiv" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.2.operating.programs.comfort/commands/$args[0]",
+            "{}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK1-Solltemperatur_comfort" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.0.operating.programs.comfort/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Solltemperatur_comfort" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.1.operating.programs.comfort/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Solltemperatur_comfort" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.2.operating.programs.comfort/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Solltemperatur_eco_aktiv" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.0.operating.programs.eco/commands/$args[0]",
+            "{}", $name, $opt, @args );
+        return;
+
+    }
+    elsif ( $opt eq "HK2-Solltemperatur_eco_aktiv" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.1.operating.programs.eco/commands/$args[0]",
+            "{}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK3-Solltemperatur_eco_aktiv" ) {
+        vitoconnect_action( $hash,
+            "heating.circuits.2.operating.programs.eco/commands/$args[0]",
+            "{}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK1-Solltemperatur_normal" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.0.operating.programs.normal/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Solltemperatur_normal" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.1.operating.programs.normal/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Solltemperatur_normal" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.2.operating.programs.normal/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Solltemperatur_reduziert" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.0.operating.programs.reduced/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK2-Solltemperatur_reduziert" ) {
+        vitoconnect_action($hash,
+            "heating.circuits.1.operating.programs.reduced/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK3-Solltemperatur_reduziert" ) {
+        vitoconnect_action($hash,
+               "heating.circuits.2.operating.programs.reduced/commands/setTemperature",
+            "{\"targetTemperature\":$args[0]}",
+            $name,
+            $opt,
+            @args
+        );
+        return;
+    }
+    elsif ( $opt eq "HK1-Name" ) {
+        vitoconnect_action( $hash, "heating.circuits.0/commands/setName",
+            "{\"name\":\"@args\"}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK2-Name" ) {
+        vitoconnect_action( $hash, "heating.circuits.1/commands/setName",
+            "{\"name\":\"@args\"}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "HK3-Name" ) {
+        vitoconnect_action( $hash, "heating.circuits.2/commands/setName",
+            "{\"name\":\"@args\"}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "WW-einmaliges_Aufladen" ) {
+        vitoconnect_action( $hash,
+            "heating.dhw.oneTimeCharge/commands/$args[0]",
+            "{}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "WW-Zirkulationspumpe_Zeitplan" ) {
+        vitoconnect_action( $hash,
+            "heating.dhw.pumps.circulation.schedule/commands/setSchedule",
+            "{\"newSchedule\":@args}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "WW-Zeitplan" ) {
+        vitoconnect_action( $hash, "heating.dhw.schedule/commands/setSchedule",
+            "{\"newSchedule\":@args}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "WW-Haupttemperatur" ) {
+        vitoconnect_action( $hash,
+            "heating.dhw.temperature.main/commands/setTargetTemperature",
+            "{\"temperature\":$args[0]}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "WW-Solltemperatur" ) {
+        vitoconnect_action( $hash,
+            "heating.dhw.temperature/commands/commands/setTargetTemperature",
+            "{\"temperature\":$args[0]}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "WW-Temperatur_2" ) {
+        vitoconnect_action( $hash,
+            "heating.dhw.temperature.temp2/commands/setTargetTemperature",
+            "{\"temperature\":$args[0]}", $name, $opt, @args );
+        return;
+    }
+    elsif ( $opt eq "Urlaub_Start" ) {
+        my $end = ReadingsVal( $name, "Urlaub_Ende", "" );
+        if ( $end eq "" ) {
+            my $t = Time::Piece->strptime( $args[0], "%Y-%m-%d" );
+            $t += ONE_DAY;
+            $end = $t->strftime("%Y-%m-%d");
+        }
+        vitoconnect_action(
+            $hash,
+            "heating.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$args[0]\",\"end\":\"$end\"}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "Urlaub_Ende" ) {
+        my $start = ReadingsVal( $name, "Urlaub_Start", "" );
+        vitoconnect_action(
+            $hash,
+            "heating.operating.programs.holiday/commands/schedule",
+            "{\"start\":\"$start\",\"end\":\"$args[0]\"}",
+            $name, $opt, @args
+        );
+        return;
+    }
+    elsif ( $opt eq "Urlaub_unschedule" ) {
+        vitoconnect_action( $hash,
+            "heating.operating.programs.holiday/commands/unschedule",
+            "{}", $name, $opt, @args );
+        return;
+    }
+
+    my $val =
+        "unknown value $opt, choose one of update:noArg clearReadings:noArg "
+      . "password apiKey logResponseOnce:noArg "
+      . "WW-einmaliges_Aufladen:activate,deactivate "
+      . "WW-Zirkulationspumpe_Zeitplan:textField-long "
+      . "WW-Zeitplan:textField-long "
+      . "WW-Haupttemperatur:slider,10,1,60 "
+      . "WW-Solltemperatur:slider,10,1,60 "
+      . "WW-Temperatur_2:slider,10,1,60 "
+      . "Urlaub_Start "
+      . "Urlaub_Ende "
+      . "Urlaub_unschedule:noArg ";
+
+    if ( ReadingsVal( $name, "HK1-aktiv", "0" ) eq "1" ) {
+        $val .=
+            "HK1-Heizkurve-Niveau:slider,-13,1,40 "
+          . "HK1-Heizkurve-Steigung:slider,0.2,0.1,3.5,1 "
+          . "HK1-Zeitsteuerung_Heizung:textField-long "
+          . "HK1-Urlaub_Start "
+          . "HK1-Urlaub_Ende "
+          . "HK1-Urlaub_unschedule:noArg "
+          . "HK1-Betriebsart:active,standby,heating,dhw,dhwAndHeating,forcedReduced,forcedNormal "
+          . "HK1-Solltemperatur_comfort_aktiv:activate,deactivate "
+          . "HK1-Solltemperatur_comfort:slider,4,1,37 "
+          . "HK1-Solltemperatur_eco_aktiv:activate,deactivate "
+          . "HK1-Solltemperatur_normal:slider,3,1,37 "
+          . "HK1-Solltemperatur_reduziert:slider,3,1,37 "
+          . "HK1-Name ";
+    }
+    if ( ReadingsVal( $name, "HK2-aktiv", "0" ) eq "1" ) {
+        $val .=
+            "HK2-Heizkurve-Niveau:slider,-13,1,40 "
+          . "HK2-Heizkurve-Steigung:slider,0.2,0.1,3.5,1 "
+          . "HK2-Zeitsteuerung_Heizung:textField-long "
+          . "HK2-Urlaub_Start "
+          . "HK2-Urlaub_Ende "
+          . "HK2-Urlaub_unschedule:noArg "
+          . "HK2-Betriebsart:active,standby,heating,dhw,dhwAndHeating,forcedReduced,forcedNormal "
+          . "HK2-Solltemperatur_comfort_aktiv:activate,deactivate "
+          . "HK2-Solltemperatur_comfort:slider,4,1,37 "
+          . "HK2-Solltemperatur_eco_aktiv:activate,deactivate "
+          . "HK2-Solltemperatur_normal:slider,3,1,37 "
+          . "HK2-Solltemperatur_reduziert:slider,3,1,37 "
+          . "HK2-Name ";
+    }
+    if ( ReadingsVal( $name, "HK3-aktiv", "0" ) eq "1" ) {
+        $val .=
+            "HK3-Heizkurve-Niveau:slider,-13,1,40 "
+          . "HK3-Heizkurve-Steigung:slider,0.2,0.1,3.5,1 "
+          . "HK3-Zeitsteuerung_Heizung:textField-long "
+          . "HK3-Urlaub_Start "
+          . "HK3-Urlaub_Ende "
+          . "HK3-Urlaub_unschedule:noArg "
+          . "HK3-Betriebsart:active,standby,heating,dhw,dhwAndHeating,forcedReduced,forcedNormal "
+          . "HK3-Solltemperatur_comfort_aktiv:activate,deactivate "
+          . "HK3-Solltemperatur_comfort:slider,4,1,37 "
+          . "HK3-Solltemperatur_eco_aktiv:activate,deactivate "
+          . "HK3-Solltemperatur_normal:slider,3,1,37 "
+          . "HK3-Solltemperatur_reduziert:slider,3,1,37 "
+          . "HK3-Name ";
+    }
+	return $val;
+}
+
+
+sub vitoconnect_Set_Roger {
+	my ($hash,$name,$opt,@args ) = @_;	# Übergabe-Parameter
 	return "set ".$name." needs at least one argument" unless (defined($opt) );
 
 	if    ($opt eq "update")							{	# set <name> update: update readings immeadiatlely
@@ -1338,15 +2462,6 @@ sub vitoconnect_Set {
 		);
 		return;
 	}
-	#elsif ($opt eq "HK1_niveau" )				{	# set <name> HK1_Heizkurve_Niveau: set shift of heating curve for HKn
-	#	my $slope = ReadingsVal($name,"HK1_niveau","");
-	#	vitoconnect_action($hash,
-	#		"heating.circuits.0.heating.curve/commands/setCurve",
-	#		"{\"shift\":$args[0],\"slope\":$slope}",
-	#		$name,$opt,@args
-	#	);
-	#	return;
-	#}
 	elsif ($opt eq "HK1_Heizkurve_Niveau" )				{	# set <name> HK1_Heizkurve_Niveau: set shift of heating curve for HKn
 		my $slope = ReadingsVal($name,"HK1_Heizkurve_Steigung","");
 		vitoconnect_action($hash,
@@ -1632,13 +2747,12 @@ sub vitoconnect_Set {
 	if (ReadingsVal($name,"HK1_aktiv","0") eq "1") {
 		$val .=
 			 "HK1_Heizkurve_Niveau:slider,-13,1,40 "
-			 #"HK1_niveau:slider,-13,1,40 "
 			."HK1_Heizkurve_Steigung:slider,0.2,0.1,3.5,1 "
 			."HK1_Zeitsteuerung_Heizung:textField-long "
 			."HK1_Urlaub_Start_Zeit "
 			."HK1_Urlaub_Ende_Zeit "
 			."HK1_Urlaub_stop:noArg "
-			."HK1_Betriebsart:active,standby,heating,dhw,dhwAndHeating,forcedReduced,forcedNormal "
+			."HK1_Betriebsart:active,standby "
 			."HK1_Soll_Temp_comfort_aktiv:activate,deactivate "
 			."HK1_Soll_Temp_comfort:slider,4,1,37 "
 			."HK1_Soll_Temp_eco_aktiv:activate,deactivate "
@@ -1722,6 +2836,13 @@ sub vitoconnect_Attr {
 			if ($@) {
 				# Fehlerbehandlung
 				my $err = "Invalid argument: $@\n";
+				return $err;
+			}
+		}
+		elsif ($attr_name eq "vitoconnect_mapping_roger")	{
+			if ($attr_value !~ /^0|1$/)						{
+				my $err = "Invalid argument ".$attr_value." to ".$attr_name.". Must be 0 or 1.";
+				Log(1,$name.", vitoconnect_Attr: ".$err);
 				return $err;
 			}
 		}
@@ -2620,10 +3741,13 @@ sub vitoconnect_getResourceCallback {
                 $Reading =
                   $RequestListMapping->{ $feature->{feature} . "." . $key };
 				}
+				elsif (AttrVal( $name, 'vitoconnect_mapping_roger', 0 ) eq "1") {
+				 # Use build in Mapping Roger (old way)
+				 $Reading = $RequestListRoger->{ $feature->{feature} . "." . $key };
+				}
 				else {
-				# Use build in Mapping (old way)
-				 $Reading =
-                  $RequestList->{ $feature->{feature} . "." . $key };
+				 # Use build in Mapping SVN (old way)
+				 $Reading = $RequestListSvn->{ $feature->{feature} . "." . $key };
 				};
 
                 if ( !defined($Reading) || AttrVal( $name, 'vitoconnect_raw_readings', 0 ) eq "1" )
@@ -2660,8 +3784,15 @@ sub vitoconnect_getResourceCallback {
                     Log3 $name, 5, "$name - $Reading: $Value ($Type)";
 					#Log3 $name, 1, "$name - $Reading: $Value ($Type)";
 				}
+				
+				# Store power readings as asSingleValue
+				if ($Reading =~ m/dayValueReadAt$/) {
+					Log(1,$name.", -call setpower $Reading");
+				 vitoconnect_getPowerLast ($hash,$name,$Reading);
+				}
 			}
 		}
+
 		readingsBulkUpdate($hash,"state","last update: ".TimeNow()."");	# Reading 'state'
 		readingsEndUpdate( $hash, 1 );	# Readings schreiben
     }
@@ -2670,6 +3801,55 @@ sub vitoconnect_getResourceCallback {
 	}
 	InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
 	Log(5,$name.", -getResourceCallback ended");
+	
+	
+	return;
+}
+
+sub vitoconnect_getPowerLast {
+    my ($hash, $name, $Reading) = @_;
+
+	# entferne alles hinter dem letzten Punkt
+	$Reading =~ s/\.[^.]*$//;
+	
+	# Liste der Stromwerte
+	my @values = split(",", ReadingsVal($name,$Reading.".day","")); #(1.2, 76.7, 52.6, 40.9, 40.4, 30, 33.9, 75);
+
+	# Zeitpunkt des ersten Wertes
+	my $timestamp = ReadingsVal($name,$Reading.".dayValueReadAt",""); #'2024-11-29T11:28:56.915Z';
+
+	if (!defined($timestamp)) {
+		return;
+	}
+
+	# Datum extrahieren und in ein Time::Piece Objekt umwandeln
+	my $date = Time::Piece->strptime(substr($timestamp, 0, 10), '%Y-%m-%d');
+
+	# Anzahl der Sekunden in einem Tag
+	my $one_day = 24 * 60 * 60;
+	
+	# Hash für die Key-Value-Paare
+	my %data;
+	my $readingLastTimestamp = ReadingsTimestamp($name,$Reading.".day.asSingleValue",'');
+	my $lastTS = "0000000000";
+	if ($readingLastTimestamp ne "") {
+	$lastTS = time_str2num($readingLastTimestamp);
+	}
+	Log(5,$name.", -setpower: readinglast: $readingLastTimestamp lastTS $lastTS");
+	
+	# Werte den entsprechenden Tagen zuordnen, start mit 1, letzten Tag ausschließen weil unvollständig
+	for (my $i = $#values; $i >= 1; $i--) {
+		my $current_date = $date - ($one_day * $i);
+
+		my $readingDate = $current_date->ymd . " 23:59:59";
+		my $readingTS = time_str2num($readingDate);
+		Log(1,$name.", -setpower: date $readingDate lastdate $readingLastTimestamp");
+		if ($readingTS > $lastTS) {
+		 readingsBulkUpdate ($hash, $Reading.".day.asSingleValue", $values[$i], undef, $readingDate);
+		 Log(4,$name.", -setpower: readingsBulkUpdate ($hash, $Reading.day.asSingleValue, $values[$i], undef, $readingDate");
+		}
+	}
+
 	return;
 }
 
@@ -2728,18 +3908,18 @@ sub vitoconnect_action {
 		method  => "POST",
 		sslargs => { SSL_verify_mode => 0 },
 	};
-	Log3($name,1,$name.", vitoconnect_action url=" .$param->{url});
-	Log3($name,1,$name.", vitoconnect_action data=".$param->{data});
+	Log3($name,3,$name.", vitoconnect_action url=" .$param->{url});
+	Log3($name,3,$name.", vitoconnect_action data=".$param->{data});
 #	https://wiki.fhem.de/wiki/HttpUtils#HttpUtils_BlockingGet
 	(my $err,my $msg) = HttpUtils_BlockingGet($param);
 	my $decode_json = eval {decode_json($msg)};
 
-	Log3($name,1,$name.", vitoconnect_action call finished err:" .$err);
+	Log3($name,3,$name.", vitoconnect_action call finished err:" .$err);
 	my $Text = join(' ',@args);	# Befehlsparameter in Text
 	if ($err ne "" || $decode_json->{statusCode} ne "")					{	# Fehler bei Befehlsausführung
 		readingsSingleUpdate($hash,"Aktion_Status","Fehler: ".$opt." ".$Text,1);	# Reading 'Aktion_Status' setzen
 		Log3($name,1,$name.",vitoconnect_action: set ".$name." ".$opt." ".@args.", Fehler bei Befehlsausfuehrung: ".$err." :: ".$msg);
-		$err = vitoconnect_errorHandling($hash,$decode_json);
+		#$err = vitoconnect_errorHandling($hash,$decode_json);
 		if ($err ==1){
 		   return;
 		}
@@ -3034,6 +4214,10 @@ sub vitoconnect_ReadKeyValue {
 					'messages' => 'nachrichten',<br>
 					'errors' => 'fehler'}<br>
 				translation will be preferred over mapping over old mapping
+            </li>
+			<a id="vitoconnect-attr-vitoconnect_mapping_roger"></a>
+			<li><i>vitoconnect-attr-vitoconnect_mapping_roger</i>:<br>
+			    Use the mapping from Roger from 8. November (https://forum.fhem.de/index.php?msg=1292441) instead of the SVN mapping.
             </li>
 			<a id="vitoconnect-attr-vitoconnect_serial"></a>
             <li><i>vitoconnect_serial</i>:<br>
