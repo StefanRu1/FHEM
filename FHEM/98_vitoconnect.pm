@@ -27,19 +27,20 @@
 
 #	https://wiki.fhem.de/wiki/DevelopmentModuleAPI
 
-sub vitoconnect_Initialize;		# Modul initialisieren und Namen zusätzlicher Funktionen bekannt geben
-sub vitoconnect_Define;			# wird beim 'define' eines Gerätes aufgerufen
-sub vitoconnect_Undef;			# wird beim Löschen einer Geräteinstanz aufgerufen
-sub vitoconnect_Get;			# bisher kein 'get' implementiert
-sub vitoconnect_Set_New;		# Implementierung set-Befehle New dynamisch auf raw readings
-sub vitoconnect_Set;			# Implementierung set-Befehle SVN
-sub vitoconnect_Set_Roger;		# Implementierung set-Befehle Roger
-sub vitoconnect_Attr;			# Attribute setzen/ändern/löschen
+sub vitoconnect_Initialize;				# Modul initialisieren und Namen zusätzlicher Funktionen bekannt geben
+sub vitoconnect_Define;					# wird beim 'define' eines Gerätes aufgerufen
+sub vitoconnect_Undef;					# wird beim Löschen einer Geräteinstanz aufgerufen
+sub vitoconnect_Get;					# bisher kein 'get' implementiert
+sub vitoconnect_check_gwa_and_get_gw;	# Nötig für Actions die nur mit einem gw laufen
+sub vitoconnect_Set_New;				# Implementierung set-Befehle New dynamisch auf raw readings
+sub vitoconnect_Set;					# Implementierung set-Befehle SVN
+sub vitoconnect_Set_Roger;				# Implementierung set-Befehle Roger
+sub vitoconnect_Attr;					# Attribute setzen/ändern/löschen
 
-sub vitoconnect_GetUpdate;		# Abfrage aller Werte starten
+sub vitoconnect_GetUpdate;				# Abfrage aller Werte starten
 
-sub vitoconnect_getCode;		# Werte für: Access-Token, Install-ID, Gateway anfragen
-sub vitoconnect_getCodeCallback;# Rückgabe: Access-Token, Install-ID, Gateway von vitoconnect_getCode Anfrage
+sub vitoconnect_getCode;				# Werte für: Access-Token, Install-ID, Gateway anfragen
+sub vitoconnect_getCodeCallback;		# Rückgabe: Access-Token, Install-ID, Gateway von vitoconnect_getCode Anfrage
 
 sub vitoconnect_getAccessToken;			# Access & Refresh-Token holen
 sub vitoconnect_getAccessTokenCallback;	# Access & Refresh-Token speichern, Antwort auf: vitoconnect_getAccessToken
@@ -63,7 +64,7 @@ sub vitoconnect_errorHandling; 			# Errors bearbeiten für alle Calls
 sub vitoconnect_getResource_per_gw;		# 
 sub vitoconnect_getResource;			# 
 sub vitoconnect_getResourceCallback;	# 
-sub vitoconnect_getPowerLast;		# Write the power reading of the full last day to the DB
+sub vitoconnect_getPowerLast;			# Write the power reading of the full last day to the DB
 
 sub vitoconnect_action;					# 
 
@@ -72,6 +73,7 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 
 ##############################################################################
 #   Changelog:
+#	2024-12-03	Fixed Gateway Serial handling.
 #	2024-12-02	Day power readings werden nun unter .asSingleValue gespeichert.
 #				Die Daten kommen von der API nur sporatisch, erst nach mehreren Tagen.
 #				Diese Funktion trägt sie nach und man kann so Graphen malen.
@@ -1736,6 +1738,9 @@ sub vitoconnect_Set_New {
     # Rückgabe der dynamisch erstellten $val Variable
 	Log(5,$name.", -set val: ". $val);
 	Log(5,$name.", -set ended ");
+	
+	vitoconnect_check_gwa_and_get_gw($hash,$name);
+	
     return $val;
 }
 
@@ -1745,6 +1750,7 @@ sub vitoconnect_Set {
 	
 	if  (AttrVal( $name, 'vitoconnect_raw_readings', 0 ) eq "1" ) {
 		#use new dynamic parsing of JSON to get raw setters
+		
 		return vitoconnect_Set_New ($hash,$name,$opt,@args);
 	}
 	
@@ -2270,6 +2276,9 @@ sub vitoconnect_Set {
           . "HK3-Solltemperatur_reduziert:slider,3,1,37 "
           . "HK3-Name ";
     }
+	
+	vitoconnect_check_gwa_and_get_gw($hash,$name);
+	
 	return $val;
 }
 
@@ -2795,6 +2804,9 @@ sub vitoconnect_Set_Roger {
           . "HK3_Solltemperatur_reduziert:slider,3,1,37 "
           . "HK3_Name ";
 	}
+	
+	vitoconnect_check_gwa_and_get_gw($hash,$name);
+	
 	return $val;
 }
 
@@ -3889,6 +3901,27 @@ sub vitoconnect_getPowerLast {
 #		}'
 #set	Heiz_ViessMann HK1_Betriebsart standby
 
+sub vitoconnect_check_gwa_and_get_gw {
+	my ($hash,$name) = @_;	# Übergabe-Parameter
+	my $gw           = $hash->{".gw"};					# Internal: .gw
+	my @gwa          = @{$hash->{".gwa"}};
+	
+	if (defined($gw) && $gw ne "") {
+		Log3($name,3,$name.", -vitoconnect_check_gwa_and_get_gw: gwFilter found reduce gwa: ".$gw);
+		@gwa = $gw;
+	}
+	
+	if (scalar @gwa > 1) {
+		readingsSingleUpdate($hash,"Aktion_Status","Fehler: mehr als ein Gateway. Bitte Device Doku lesen und vitoconnect_serial setzen",1);	# Reading 'Aktion_Status' setzen
+		return(-1);
+	} elsif (scalar @gwa == 0) {
+		readingsSingleUpdate($hash,"Aktion_Status","Fehler: kein Gateway gefunden. Bitte Entwickler melden mit gw.json aud FHEM log",1);	# Reading 'Aktion_Status' setzen
+		return(-1);
+	} else {
+	 $gw = $gwa[0];
+	}
+	return $gw;
+}
 
 #####################################################################################################################
 # Setzen von Daten
@@ -3896,9 +3929,14 @@ sub vitoconnect_getPowerLast {
 sub vitoconnect_action {
 	my ($hash,$feature,$data,$name,$opt,@args ) = @_;	# Übergabe-Parameter
 	my $access_token = $hash->{".access_token"};		# Internal: .access_token
-	my $installation = $hash->{".installation"};		# Internal: .installation
-	my $gw           = $hash->{".gw"};					# Internal: .gw
+	my $installation = $hash->{".installation"};		# Internal: .installation	
 	my $dev          = AttrVal($name,'vitoconnect_device',0);	# Attribut: vitoconnect_device
+	
+	my $gw = vitoconnect_check_gwa_and_get_gw($hash,$name);
+	if ($gw == -1){
+		return;
+	}
+	
 	my $param        = {
 		url => $iotURL_V2
 		."installations/".$installation."/gateways/".$gw."/"
@@ -4078,7 +4116,7 @@ sub vitoconnect_ReadKeyValue {
 			Create an account, add a new client (google reCAPTCHA disabled, Redirect URI = http://localhost:4200/).
 			Copy the Client ID here as apiKey</li>
 		<br>
-		<code>New setters used if vitoconnect_raw_readings = 1<code>
+		<code>New setters used if vitoconnect_raw_readings = 1, if you have more than one gateway serial you must define it to use the setters<code>
         <code>Old static mapping setters, only used if attr vitoconnect_raw_readings = 0<code>
 		<li><code>HKn_Heizkurve_Niveau shift</code><br>
 			set shift of heating curve for HKn</li>
@@ -4226,13 +4264,14 @@ sub vitoconnect_ReadKeyValue {
             <li><i>vitoconnect_serial</i>:<br>
             	Define the serial of the gateway to be used.
 				If there is only one gateway you do not have to care about it.
-				If you have more than one gateway by default all readings of all gateways are collected.
+				If you have more than one gateway by default all readings of all gateways are collected, every reading is appended by the gateway serial.
 				E.g. if you have two gateways this will be two calls to the API. 
 				The viessmann API has a limit of 1400 calls a day.
 				It makes sense in a hybrid setup to define two devices for every gateway.
 				With this you can get the data of the Heatpumpe more frequently than the data of the Burner.
-				You can get the serials by setting vitoconnect_gw_readings = 1 and checking the corresponding readings gw and number_of_gateways.				
+				You can get the serials by setting vitoconnect_gw_readings = 1 and checking the corresponding readings gw and number_of_gateways.
 				
+				If you want to use the setters please set a vitoconnect_serial. If not you will get an error message in Aktion_Status to do so.
             </li>
 			<a id="vitoconnect-attr-vitoconnect_timeout"></a>
             <li><i>vitoconnect_timeout</i>:<br>
