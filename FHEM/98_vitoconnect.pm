@@ -74,6 +74,7 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 ##############################################################################
 #   Changelog:
 #	2024-12-04	Fixed getResource to read gw in first try, this will fix the unnecessary API calls if you do not specify a Gateway Serial
+#				Fixed timers if more than one Gateway
 #	2024-12-03	Fixed Gateway Serial handling.
 #	2024-12-02	Day power readings werden nun unter .asSingleValue gespeichert.
 #				Die Daten kommen von der API nur sporatisch, erst nach mehreren Tagen.
@@ -1740,7 +1741,7 @@ sub vitoconnect_Set_New {
 	Log(5,$name.", -set val: ". $val);
 	Log(5,$name.", -set ended ");
 	
-	vitoconnect_check_gwa_and_get_gw($hash,$name);
+	#vitoconnect_check_gwa_and_get_gw($hash,$name);
 	
     return $val;
 }
@@ -2278,7 +2279,7 @@ sub vitoconnect_Set {
           . "HK3-Name ";
     }
 	
-	vitoconnect_check_gwa_and_get_gw($hash,$name);
+	#vitoconnect_check_gwa_and_get_gw($hash,$name);
 	
 	return $val;
 }
@@ -2806,7 +2807,7 @@ sub vitoconnect_Set_Roger {
           . "HK3_Name ";
 	}
 	
-	vitoconnect_check_gwa_and_get_gw($hash,$name);
+	#vitoconnect_check_gwa_and_get_gw($hash,$name);
 	
 	return $val;
 }
@@ -2816,7 +2817,7 @@ sub vitoconnect_Set_Roger {
 #####################################################################################################################
 sub vitoconnect_Attr {
 	my ($cmd,$name,$attr_name,$attr_value ) = @_;
-		Log(5,$name.", ".$cmd ." vitoconnect_: ".$attr_name." value: ".$attr_value);
+		#Log(5,$name.", ".$cmd ." vitoconnect_: ".$attr_name." value: ".$attr_value);
 	if ($cmd eq "set")	{
 		if ($attr_name eq "vitoconnect_raw_readings" )		{
 			if ($attr_value !~ /^0|1$/)						{
@@ -3366,22 +3367,29 @@ sub vitoconnect_getDevice {
 		Log(5,$name.", - getDevice gw found reduce gwa: ".$gw);
 		@gwa = $gw;
 	}
-	
+	my $index = 0;
+	my $last = 0;
+	my $last_index = $#gwa;
 	foreach ( @gwa ) {
 	$gw = $_;
 	Log(5,$name.", --getDevice gw for call set: ".$gw);
+	if ($index == $last_index) { 
+	 $last = 1;
+	}
 	my $param        = {
 #		url     => $apiURL
 		url     => $iotURL_V1
 		."installations/".$installation."/gateways/".$gw."/devices",
 		hash    => $hash,
 		gw      => $gw,
+		last     => $last,
 		header  => "Authorization: Bearer ".$access_token,
 		timeout => $hash->{timeout},
 		sslargs => { SSL_verify_mode => 0 },
 		callback => \&vitoconnect_getDeviceCallback
 	};
 	HttpUtils_NonblockingGet($param);
+	$index++;
 	};
 	return;
 }
@@ -3395,14 +3403,16 @@ sub vitoconnect_getDeviceCallback {
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
 	my $gw = $param->{gw};
+	my $last = $param->{last};
    Log(5,$name.", -getDeviceCallback get device gw: ".$gw);
     if ($err eq "")							{
         Log3 $name, 4, "$name - getDeviceCallback went ok";
         Log3 $name, 5, "$name - Received response: $response_body\n";
         my $items = eval { decode_json($response_body) };
         if ($@)								{
+			RemoveInternalTimer($hash);
 			readingsSingleUpdate($hash,"state","JSON error while request: ".$@,1);
-			Log3($name,1,$name.", vitoconnect_getDeviceCallback: JSON error while request: ".$@);
+			Log3($name,1,$name.", vitoconnect_getDeviceCallback: JSON error while request: ".$@);			
             InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
             return;
         }
@@ -3417,7 +3427,7 @@ sub vitoconnect_getDeviceCallback {
 		if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
           readingsSingleUpdate($hash,"device",$response_body,1);	# im Reading 'device' merken
 		}
-		vitoconnect_getFeatures($hash,$gw);
+		vitoconnect_getFeatures($hash,$gw,$last);
 	}
 	else {
 		if ((defined($err) && $err ne "")) {   	# Fehler aufgetreten
@@ -3425,6 +3435,7 @@ sub vitoconnect_getDeviceCallback {
 		} else {
 		Log3($name,1,$name." - An undefined error occured");
 		}
+		RemoveInternalTimer($hash);
 		InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
     }
     return;
@@ -3438,7 +3449,8 @@ sub vitoconnect_getDeviceCallback {
 
 sub vitoconnect_getFeatures {
 	my ($hash)       =  shift;	# Übergabe-Parameter
-	my $gw            =  shift;
+	my $gw           =  shift;
+	my $last         =  shift;
 	my $name         = $hash->{NAME};
 	my $access_token = $hash->{".access_token"};
 	my $installation = $hash->{".installation"};
@@ -3456,6 +3468,7 @@ sub vitoconnect_getFeatures {
 		."installations/".$installation."/gateways/".$gw."/features",
 		hash   => $hash,
 		gw     => $gw,
+		last     => $last,
 		header => "Authorization: Bearer ".$access_token,
 		timeout => $hash->{timeout},
 		sslargs => { SSL_verify_mode => 0 },
@@ -3477,6 +3490,7 @@ sub vitoconnect_getFeaturesCallback {
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
 	my $gw = $param->{gw};
+	my $last = $param->{last};
 	my @gwa = @{$hash->{".gwa"}};
 	my $gwFilter = $hash->{".gw"};
 	my $readingName ="gw_features";
@@ -3502,7 +3516,7 @@ sub vitoconnect_getFeaturesCallback {
 	};
 		readingsSingleUpdate($hash,$readingName,$response_body,1);	# im Reading 'gw_features' merken
 	}
-		vitoconnect_getResource_per_gw($hash,$gw);
+		vitoconnect_getResource_per_gw($hash,$gw,$last);
 	}
 }
 
@@ -3514,7 +3528,6 @@ sub vitoconnect_errorHandling {
 	my ($hash,$items) = @_;
 	my $name         = $hash->{NAME};
 	
-		# kein Fehler
         if (!$items->{statusCode} eq "")	{
             Log3 $name, 4,
                 "$name - statusCode: $items->{statusCode} "
@@ -3539,6 +3552,7 @@ sub vitoconnect_errorHandling {
             elsif ( $items->{statusCode} eq "404" ) {
 
                 # DEVICE_NOT_FOUND
+				RemoveInternalTimer($hash);
 				readingsSingleUpdate($hash,"state","Device not found: Optolink prüfen!",1);
                 Log3 $name, 1, "$name - Device not found: Optolink prüfen!";
                 InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
@@ -3547,6 +3561,7 @@ sub vitoconnect_errorHandling {
             elsif ( $items->{statusCode} eq "429" ) {
 
                 # RATE_LIMIT_EXCEEDED
+				RemoveInternalTimer($hash);
 				readingsSingleUpdate($hash,"state","Anzahl der möglichen API Calls in überschritten!",1);
                 Log3 $name, 1,
                   "$name - Anzahl der möglichen API Calls in überschritten!";
@@ -3554,6 +3569,7 @@ sub vitoconnect_errorHandling {
                 return(1);
             }
             elsif ( $items->{statusCode} eq "502" ) {
+				RemoveInternalTimer($hash);
 				readingsSingleUpdate($hash,"state","temporärer API Fehler",1);
                 # DEVICE_COMMUNICATION_ERROR error: Bad Gateway
                 Log3 $name, 1, "$name - temporärer API Fehler";
@@ -3561,6 +3577,7 @@ sub vitoconnect_errorHandling {
                 return(1);
             }
             else {
+				RemoveInternalTimer($hash);
 				readingsSingleUpdate($hash,"state","unbekannter Fehler, bitte den Entwickler informieren!",1);
                 Log3 $name, 1, "$name - unbekannter Fehler: "
                   . "Bitte den Entwickler informieren!";
@@ -3584,6 +3601,7 @@ sub vitoconnect_errorHandling {
 sub vitoconnect_getResource_per_gw {
 	my ($hash)       = shift;				# Übergabe-Parameter
 	my $gw           = shift;
+	my $last         = shift;
 	my $name         = $hash->{NAME};	# Device-Name
 	my $access_token = $hash->{".access_token"};
 	my $installation = $hash->{".installation"};
@@ -3594,7 +3612,9 @@ sub vitoconnect_getResource_per_gw {
 	Log3($name,4,$name." - installation: ".$installation);
 	Log3($name,4,$name." - gw: ".$gw);
 	if ($access_token eq "" || $installation eq "" || $gw eq "") {	# noch kein: Token, ID, GW
-		vitoconnect_getCode($hash);
+		if ($last == 1) {
+		 vitoconnect_getCode($hash);
+		}
 		return;
 	}
 	my $param = {
@@ -3602,6 +3622,7 @@ sub vitoconnect_getResource_per_gw {
 		."installations/".$installation."/gateways/".$gw."/devices/".$dev."/features",
 		hash     => $hash,
 		gw       => $gw,
+		last     => $last,
 		header   => "Authorization: Bearer $access_token",
 		timeout  => $hash->{timeout},
 		sslargs  => { SSL_verify_mode => 0 },
@@ -3625,26 +3646,40 @@ sub vitoconnect_getResource {
 	my $gw           = $hash->{".gw"};
 	my $dev          = AttrVal($name,'vitoconnect_device',0);
 	my $gwatemp      = $hash->{".gwa"};
-	my @gwa = {};
-
+	my @gwa = ();
+	
 	if (defined($gwatemp) && $gwatemp ne "") {
-      @gwa = $gwatemp;
+      @gwa = @{$gwatemp};
 	}
 	if (defined($gw) && $gw ne "") {
 		Log(5,$name.", - vitoconnect_getResource Resource gw found reduce gwa: ".$gw);
 		@gwa = $gw;
 	}
 	
+	my $index = 0;
+	my $last = 0;
+	my $last_index = $#gwa;
+	if ($last_index == -1)
+	{
+		 Log3($name,3,$name." - getResource missing gateway information: will try to get it fresh");
+		 vitoconnect_getCode($hash);
+	}
 	foreach ( @gwa ) {
 	$gw = $_;
-	Log3($name,4,$name." - enter getResource");
+	Log3($name,4,$name." - enter getResource gw: $gw");
 	Log3($name,4,$name." - access_token: ".substr($access_token,0,20)."...");
 	Log3($name,4,$name." - installation: ".$installation);
 	Log3($name,4,$name." - gw: ".$gw);
 	if ($access_token eq "" || $installation eq "" || $gw eq "") {	# noch kein: Token, ID, GW
-		Log3($name,3,$name." - getResource update task missing information Token: $access_token, Installation: $installation, Gateway: $gw, will try to get it fresh.");
-		vitoconnect_getCode($hash);
+		Log3($name,3,$name." - getResource missing information Token: $access_token, Installation: $installation, Gateway: $gw");
+		if ($last == 1) {
+		 Log3($name,3,$name." - getResource missing information: will try to get it fresh");
+		 vitoconnect_getCode($hash);
+		}
 		return;
+	}
+	if ($index == $last_index) { 
+	 $last = 1;
 	}
 	my $param = {
 #		url => $apiURL
@@ -3652,12 +3687,14 @@ sub vitoconnect_getResource {
 		."installations/".$installation."/gateways/".$gw."/devices/".$dev."/features",
 		hash     => $hash,
 		gw       => $gw,
+		last     => $last,
 		header   => "Authorization: Bearer $access_token",
 		timeout  => $hash->{timeout},
 		sslargs  => { SSL_verify_mode => 0 },
 		callback => \&vitoconnect_getResourceCallback
 	};
 	HttpUtils_NonblockingGet($param);	# non-blocking aufrufen --> Antwort an: vitoconnect_getResourceCallback
+	$index++;
 	};
     return;
 }
@@ -3673,6 +3710,7 @@ sub vitoconnect_getResourceCallback {
 	my $hash   = $param->{hash};
 	my $name   = $hash->{NAME};
 	my $gw     = $param->{gw};
+	my $last = $param->{last};
 	my @gwa    = @{$hash->{".gwa"}};
 	my $gwFilter = $hash->{".gw"};
 	
@@ -3695,7 +3733,9 @@ sub vitoconnect_getResourceCallback {
 		if ($@)								{	# Fehler beim JSON dekodieren
 			readingsSingleUpdate($hash,"state","JSON error while request: ".$@,1);	# Reading 'state'
 			Log3($name,1,$name.", vitoconnect_getResourceCallback: JSON error while request: ".$@);
-			InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+			if ($last == 1) {
+			 InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+			}
 			return;
 		}
 		
@@ -3817,7 +3857,9 @@ sub vitoconnect_getResourceCallback {
     else {
 		Log3($name,1,$name." - An error occured: ".$err);
 	}
-	InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+	if ($last == 1 ) {
+	  InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+	}
 	Log(5,$name.", -getResourceCallback ended");
 	
 	
@@ -3907,7 +3949,12 @@ sub vitoconnect_getPowerLast {
 sub vitoconnect_check_gwa_and_get_gw {
 	my ($hash,$name) = @_;	# Übergabe-Parameter
 	my $gw           = $hash->{".gw"};					# Internal: .gw
-	my @gwa          = @{$hash->{".gwa"}};
+	my $gwatemp      = $hash->{".gwa"};
+	my @gwa = ();
+
+	if (defined($gwatemp) && $gwatemp ne "") {
+      @gwa = @{$gwatemp};
+	}
 	
 	if (defined($gw) && $gw ne "") {
 		Log3($name,3,$name.", -vitoconnect_check_gwa_and_get_gw: gwFilter found reduce gwa: ".$gw);
@@ -3960,7 +4007,7 @@ sub vitoconnect_action {
 
 	Log3($name,3,$name.", vitoconnect_action call finished err:" .$err);
 	my $Text = join(' ',@args);	# Befehlsparameter in Text
-	if ($err ne "" || $decode_json->{statusCode} ne "")					{	# Fehler bei Befehlsausführung
+	if ( (defined($err) && $err ne "") || (defined($decode_json->{statusCode}) && $decode_json->{statusCode} ne "") )					{	# Fehler bei Befehlsausführung
 		readingsSingleUpdate($hash,"Aktion_Status","Fehler: ".$opt." ".$Text,1);	# Reading 'Aktion_Status' setzen
 		Log3($name,1,$name.",vitoconnect_action: set ".$name." ".$opt." ".@args.", Fehler bei Befehlsausfuehrung: ".$err." :: ".$msg);
 		#$err = vitoconnect_errorHandling($hash,$decode_json);
