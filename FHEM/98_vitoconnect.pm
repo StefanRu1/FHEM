@@ -73,6 +73,7 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 
 ##############################################################################
 #   Changelog:
+#	2024-12-04	Fixed getResource to read gw in first try, this will fix the unnecessary API calls if you do not specify a Gateway Serial
 #	2024-12-03	Fixed Gateway Serial handling.
 #	2024-12-02	Day power readings werden nun unter .asSingleValue gespeichert.
 #				Die Daten kommen von der API nur sporatisch, erst nach mehreren Tagen.
@@ -3635,11 +3636,13 @@ sub vitoconnect_getResource {
 	}
 	
 	foreach ( @gwa ) {
+	$gw = $_;
 	Log3($name,4,$name." - enter getResource");
 	Log3($name,4,$name." - access_token: ".substr($access_token,0,20)."...");
 	Log3($name,4,$name." - installation: ".$installation);
 	Log3($name,4,$name." - gw: ".$gw);
-	if ($access_token eq "" || $installation eq "" || $gw eq "" || $gwatemp eq "") {	# noch kein: Token, ID, GW
+	if ($access_token eq "" || $installation eq "" || $gw eq "") {	# noch kein: Token, ID, GW
+		Log3($name,3,$name." - getResource update task missing information Token: $access_token, Installation: $installation, Gateway: $gw, will try to get it fresh.");
 		vitoconnect_getCode($hash);
 		return;
 	}
