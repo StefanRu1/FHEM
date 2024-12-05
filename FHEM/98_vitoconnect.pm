@@ -73,6 +73,7 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 
 ##############################################################################
 #   Changelog:
+#	2024-12-05	Error fixed remove logReponseOnce Flag after one run
 #	2024-12-04	Fixed getResource to read gw in first try, this will fix the unnecessary API calls if you do not specify a Gateway Serial
 #				Fixed timers if more than one Gateway
 #	2024-12-03	Fixed Gateway Serial handling.
@@ -3751,6 +3752,9 @@ sub vitoconnect_getResourceCallback {
 			#$file_handle->print(Dumper($items));						# Datei 'resource.json' schreiben
 			$file_handle->print(Dumper($response_body));						# Datei 'resource.json' schreiben
 			Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
+			if ($last == 1) {
+			$hash->{".logResponseOnce"} = 0;
+			}
 		}
 		
 		my $gwaCount = scalar @gwa;
