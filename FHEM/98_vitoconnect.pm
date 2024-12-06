@@ -73,6 +73,7 @@ sub vitoconnect_ReadKeyValue;			# verschlüsselte Werte auslesen
 
 ##############################################################################
 #   Changelog:
+#	2024-12-06	Remove internal timer when Device gets defined or redefined
 #	2024-12-05	Error fixed remove logReponseOnce Flag after one run
 #	2024-12-04	Fixed getResource to read gw in first try, this will fix the unnecessary API calls if you do not specify a Gateway Serial
 #				Fixed timers if more than one Gateway
@@ -1506,6 +1507,7 @@ sub vitoconnect_Define {
 		Log3($name,3,$name." - Passwort war bereits gespeichert");
 	}
 	$hash->{apiKey} = vitoconnect_ReadKeyValue($hash,"apiKey");			# verschlüsselten apiKey auslesen
+	RemoveInternalTimer($hash);	# Timer löschen, z.b. bei intervall change
     InternalTimer(gettimeofday() + 10,"vitoconnect_GetUpdate",$hash);	# nach 10s
     return;
 }
@@ -3608,7 +3610,7 @@ sub vitoconnect_getResource_per_gw {
 	my $installation = $hash->{".installation"};
 	my $dev          = AttrVal($name,'vitoconnect_device',0);
 
-	Log3($name,4,$name." - enter getResource");
+	Log3($name,4,$name." - enter getResourceOnce");
 	Log3($name,4,$name." - access_token: ".substr($access_token,0,20)."...");
 	Log3($name,4,$name." - installation: ".$installation);
 	Log3($name,4,$name." - gw: ".$gw);
@@ -3667,7 +3669,7 @@ sub vitoconnect_getResource {
 	}
 	foreach ( @gwa ) {
 	$gw = $_;
-	Log3($name,4,$name." - enter getResource gw: $gw");
+	Log3($name,4,$name." - enter getResource");
 	Log3($name,4,$name." - access_token: ".substr($access_token,0,20)."...");
 	Log3($name,4,$name." - installation: ".$installation);
 	Log3($name,4,$name." - gw: ".$gw);
