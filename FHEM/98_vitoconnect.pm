@@ -4373,7 +4373,11 @@ sub vitoconnect_ReadKeyValue {
         </li>           
         <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
         <li><i>vitoconnect_raw_readings</i>:<br>         
-            Create readings with plain JSON names like 'heating.circuits.0.heating.curve.slope' instead of German identifiers (old mapping), mapping attribute, or translation attribute. When using raw readings, setters will be created dynamically matching the raw readings (new). I recommend this setting since you get everything as dynamically as possible from the API. You can use stateFormat or userReadings to display your important readings with a readable name. If vitoconnect_raw_readings is set, no mapping will be used.
+            Create readings with plain JSON names like 'heating.circuits.0.heating.curve.slope' instead of German identifiers (old mapping), mapping attribute, or translation attribute.<br>
+            When using raw readings, setters will be created dynamically matching the raw readings (new).<br>
+            I recommend this setting since you get everything as dynamically as possible from the API.<br>
+            You can use stateFormat or userReadings to display your important readings with a readable name.<br>
+            If vitoconnect_raw_readings is set, no mapping will be used.
         </li>
         <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
         <li><i>vitoconnect_gw_readings</i>:<br>         
@@ -4407,9 +4411,16 @@ sub vitoconnect_ReadKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_serial"></a>
         <li><i>vitoconnect_serial</i>:<br>
-            Define the serial of the gateway to be used. If there is only one gateway, you do not have to care about it. If you have more than one gateway, by default all readings of all gateways are collected, and every reading is appended by the gateway serial. For example, if you have two gateways, this will be two calls to the API. The Viessmann API has a limit of 1400 calls a day. It makes sense in a hybrid setup to define two devices for every gateway. With this, you can get the data of the heat pump more frequently than the data of the burner. You can get the serials by setting vitoconnect_gw_readings = 1 and checking the corresponding readings gw and number_of_gateways.
-            
-            If you want to use the setters, please set a vitoconnect_serial. If not, you will get an error message in Aktion_Status to do so.
+            Define the serial of the gateway to be used.<br>
+            If there is only one gateway, you do not have to care about it.<br>
+            If you have more than one gateway, by default all readings of all gateways are collected, and every reading is appended by the gateway serial.<br>
+            For example, if you have two gateways, this will be two calls to the API.<br>
+            The Viessmann API has a limit of 1400 calls a day.<br>
+            It makes sense in a hybrid setup to define two devices for every gateway.<br>
+            With this, you can get the data of the heat pump more frequently than the data of the burner.<br>
+            You can get the serials by setting vitoconnect_gw_readings = 1 and checking the corresponding readings gw and number_of_gateways.<br>
+            If you want to use the setters, please set a vitoconnect_serial.<br>
+            If not, you will get an error message in Aktion_Status to do so.
         </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
@@ -4590,7 +4601,11 @@ sub vitoconnect_ReadKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
         <li><i>vitoconnect_raw_readings</i>:<br>         
-            Erstellt Readings mit einfachen JSON-Namen wie 'heating.circuits.0.heating.curve.slope' anstelle von deutschen Bezeichnern (altes Mappping), mapping Attribute, oder translation Attribute. Werden raw Readings verwenbdet werden die setter dynamisch erstellt, die den raw Readings entsprechen (neu). Ich empfehle diese Einstellung, da Sie alles so dynamisch wie möglich von der API erhalten. Sie können stateFormat oder userReadings verwenden, um Ihre wichtigen Readings mit einem lesbaren Namen anzuzeigen. Wenn vitoconnect_raw_readings gesetzt ist, wird kein Mapping verwendet.
+            Erstellt Readings mit einfachen JSON-Namen wie 'heating.circuits.0.heating.curve.slope' anstelle von deutschen Bezeichnern (altes Mappping), mapping Attribute, oder translation Attribute.<br>
+            Werden raw Readings verwenbdet werden die setter dynamisch erstellt, die den raw Readings entsprechen (neu).<br>
+            Ich empfehle diese Einstellung, da Sie alles so dynamisch wie möglich von der API erhalten.<br>
+            Sie können stateFormat oder userReadings verwenden, um Ihre wichtigen Readings mit einem lesbaren Namen anzuzeigen.<br>
+            Wenn vitoconnect_raw_readings gesetzt ist, wird kein Mapping verwendet.
         </li>
         <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
         <li><i>vitoconnect_gw_readings</i>:<br>         
@@ -4624,9 +4639,16 @@ sub vitoconnect_ReadKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_serial"></a>
         <li><i>vitoconnect_serial</i>:<br>
-            Definieren Sie die Seriennummer des zu verwendenden Gateways. Wenn es nur ein Gateway gibt, müssen Sie sich nicht darum kümmern. Wenn Sie mehr als ein Gateway haben, werden standardmäßig alle Messwerte aller Gateways gesammelt, und jeder Messwert wird mit der Gateway-Seriennummer versehen. Wenn Sie beispielsweise zwei Gateways haben, werden zwei API-Aufrufe durchgeführt. Die Viessmann-API hat ein Limit von 1400 Aufrufen pro Tag. Es macht in einem hybriden Setup Sinn, zwei Geräte für jedes Gateway zu definieren. Damit können Sie die Daten der Wärmepumpe häufiger als die Daten des Brenners abrufen. Sie können die Seriennummern erhalten, indem Sie vitoconnect_gw_readings = 1 setzen und die entsprechenden Readings gw und number_of_gateways überprüfen.
-            
-            Wenn Sie die Setter verwenden möchten, setzen Sie bitte eine vitoconnect_serial. Andernfalls erhalten Sie eine Fehlermeldung in Aktion_Status, dies zu tun.
+            Definieren Sie die Seriennummer des zu verwendenden Gateways.<br>
+            Wenn es nur ein Gateway gibt, müssen Sie sich nicht darum kümmern.<br>
+            Wenn Sie mehr als ein Gateway haben, werden standardmäßig alle Readings aller Gateways gesammelt, und jedes Reading wird mit der Gateway-Seriennummer versehen.<br>
+            Wenn Sie beispielsweise zwei Gateways haben, werden zwei API-Aufrufe durchgeführt.<br>
+            Die Viessmann-API hat ein Limit von 1400 Aufrufen pro Tag.<br>
+            Es macht in einem hybriden Setup Sinn, zwei Geräte für jedes Gateway zu definieren.<br>
+            Damit können Sie die Daten der Wärmepumpe häufiger als die Daten des Brenners abrufen.<br>
+            Sie können die Seriennummern erhalten, indem Sie vitoconnect_gw_readings = 1 setzen und die entsprechenden Readings gw und number_of_gateways überprüfen.<br>            
+            Wenn Sie die Setter verwenden möchten, setzen Sie bitte eine vitoconnect_serial.<br>
+            Andernfalls erhalten Sie eine Fehlermeldung in Aktion_Status, dies zu tun.
         </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
