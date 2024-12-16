@@ -56,13 +56,13 @@ sub vitoconnect_getInstallationCallback;# Install-ID speichern, Antwort von Abfr
 sub vitoconnect_getDevice;              # Abfrage Device-ID
 sub vitoconnect_getDeviceCallback;      # Device-ID speichern, Anwort von Abfrage Device-ID
 
-sub vitoconnect_getFeatures;            # 
-sub vitoconnect_getFeaturesCallback;    # 
+sub vitoconnect_getFeatures;            # Abruf GW Features
+sub vitoconnect_getFeaturesCallback;    # gw_features speichern
 
 sub vitoconnect_errorHandling;          # Errors bearbeiten für alle Calls
-sub vitoconnect_getResource_per_gw;     # 
-sub vitoconnect_getResource;            # 
-sub vitoconnect_getResourceCallback;    # 
+sub vitoconnect_getResource_per_gw;     # API call per Gateway
+sub vitoconnect_getResource;            # API call for all Gateways
+sub vitoconnect_getResourceCallback;    # Get all API readings
 sub vitoconnect_getPowerLast;           # Write the power reading of the full last day to the DB
 
 sub vitoconnect_action;                 # 
@@ -316,13 +316,14 @@ use Path::Tiny;
 use DateTime;
 use Time::Piece;
 use Time::Seconds;
-use Time::Piece;
+
 eval "use FHEM::Meta;1"                   or my $modMetaAbsent = 1;                  ## no critic 'eval'
 use FHEM::SynoModules::SMUtils qw (
                                    moduleVersion
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.2.1"  => "16.12.2024  German and English texts in UI".
   "0.2.0"  => "14.12.2024  FVersion introduced, a bit of code beautifying".
                           "sort keys per reading to ensure power readings are in the right order, day before dayvalue",
   "0.1.1"  => "12.12.2024  In case of more than one Gateway only allow Set_New if serial is provided. ".
@@ -4214,7 +4215,6 @@ sub vitoconnect_ReadKeyValue {
     <a href="https://github.com/thetrueavatar/Viessmann-Api">thetrueavatar</a><br>
     
      You need the user and password from the ViCare App account.<br>
-     Attention: This module is limited to one 'installation' per account. If you have two or more heaters use one viessmann account and device for each heater.<br>
      
      For details see: <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (german)</a><br><br>
      
@@ -4222,6 +4222,7 @@ sub vitoconnect_ReadKeyValue {
      <ul>
      <li>Path::Tiny</li>
      <li>JSON</li>
+     <li>JSON:XS</li>
      <li>DateTime</li>
      </ul>   
          
@@ -4353,103 +4354,292 @@ sub vitoconnect_ReadKeyValue {
     </ul>
     <br>
     
-    <a name="vitoconnect-attr"></a>
-    <b>Attributes</b>
-    <ul>
-        <code>attr &lt;name&gt; &lt;attribute&gt; &lt;value&gt;</code>
-        <br><br>
-        See <a href="http://fhem.de/commandref.html#attr">commandref#attr</a> for more info about 
-        the attr command.
-        <br><br>
-        Attributes:
-        <ul>
-            <a id="vitoconnect-attr-disable"></a>
-            <li><i>disable</i>:<br>         
-                stop communication with Viessmann server  
-            </li>
-            <a id="vitoconnect-attr-verbose"></a>
-            <li><i>verbose</i>:<br>         
-                set the verbosity level  
-            </li>           
-            <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
-            <li><i>vitoconnect_raw_readings</i>:<br>         
-                Create readings with plain JSON names like 'heating.circuits.0.heating.curve.slope'.
-                Instead of german identifiers (old mapping), mapping attribute or transaltion attribute.
-                Also use raw setters, setters will be greated dynamicaly matching to the raw readings (new).
-                I recommend this setting since you get everything as danymic as possible from the API.
-                You can use stateFormat or userReadings to daiplay your important Readings with a readable name.
-                If vitoconnect_raw_readings is no mapping will be used.
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
-            <li><i>vitoconnect_gw_readings</i>:<br>         
-                create readings from the gateway, including information if you have more than one gateway  
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_actions_active"></a>
-            <li><i>vitoconnect_actions_active</i>:<br>
-                create readings for actions e.g. 'heating.circuits.0.heating.curve.setCurve.setURI'
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_mappings"></a>
-            <li><i>vitoconnect_mappings</i>:<br>
-                Define your own mapping of key value pairs, instead of using the build in.
-                The format has to be:<br>
-                mapping<br>
-                {  'device.serial.value' => 'device_serial',<br>
-                    'heating.boiler.sensors.temperature.main.status' => 'status',<br>
-                    'heating.boiler.sensors.temperature.main.value' => 'haupt_temperatur'}<br>
-                    mapping will be preffered over old mapping
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_translations"></a>
-            <li><i>vitoconnect_translations</i>:<br>
-                Define your own translation, it will translate every word part for part.
-                The format has to be:<br>
-                translation<br>
-                (   'device' => 'gerät',<br>
-                    'messages' => 'nachrichten',<br>
-                    'errors' => 'fehler'}<br>
-                translation will be preferred over mapping over old mapping
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_mapping_roger"></a>
-            <li><i>vitoconnect-attr-vitoconnect_mapping_roger</i>:<br>
-                Use the mapping from Roger from 8. November (https://forum.fhem.de/index.php?msg=1292441) instead of the SVN mapping.
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_serial"></a>
-            <li><i>vitoconnect_serial</i>:<br>
-                Define the serial of the gateway to be used.
-                If there is only one gateway you do not have to care about it.
-                If you have more than one gateway by default all readings of all gateways are collected, every reading is appended by the gateway serial.
-                E.g. if you have two gateways this will be two calls to the API. 
-                The viessmann API has a limit of 1400 calls a day.
-                It makes sense in a hybrid setup to define two devices for every gateway.
-                With this you can get the data of the Heatpumpe more frequently than the data of the Burner.
-                You can get the serials by setting vitoconnect_gw_readings = 1 and checking the corresponding readings gw and number_of_gateways.
-                
-                If you want to use the setters please set a vitoconnect_serial. If not you will get an error message in Aktion_Status to do so.
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_timeout"></a>
-            <li><i>vitoconnect_timeout</i>:<br>
-                sets a timeout for the API call
-            </li>
-            <a id="vitoconnect-attr-vitoconnect_device"></a>
-            <li><i>vitoconnect_device</i>:<br>
-                You can define the device 0 (standard) or 1.
-                I can not test this because i have only one device.
-            </li>
-        </ul>
-    </ul>
-    
-    <a id="vitoconnect-vitoconnectreadings"></a>
-    <b>Readings</b>
+<a name="vitoconnect-attr"></a>
+<b>Attributes</b>
+<ul>
+    <code>attr &lt;name&gt; &lt;attribute&gt; &lt;value&gt;</code>
     <br><br>
-     <i>vitoconnect</i> sets one reading for every value delivered by 
-     the API (depends on the type and the settings of your heater and the version of the API!).
-     Already known values will be mapped to clear names. Unknown values will added with their JSON path
-     (e.g. "heating.burner.modulation.value").
-     Please report new readings to the module maintainer. A description of the known reading
-     could be found <a href="https://wiki.fhem.de/wiki/Vitoconnect">here (german)</a>       
-    
+    See <a href="http://fhem.de/commandref.html#attr">commandref#attr</a> for more info about the attr command.
+    <br><br>
+    Attributes:
+    <ul>
+        <a id="vitoconnect-attr-disable"></a>
+        <li><i>disable</i>:<br>         
+            Stop communication with the Viessmann server.
+        </li>
+        <a id="vitoconnect-attr-verbose"></a>
+        <li><i>verbose</i>:<br>         
+            Set the verbosity level.
+        </li>           
+        <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
+        <li><i>vitoconnect_raw_readings</i>:<br>         
+            Create readings with plain JSON names like 'heating.circuits.0.heating.curve.slope' instead of German identifiers (old mapping), mapping attribute, or translation attribute. When using raw readings, setters will be created dynamically matching the raw readings (new). I recommend this setting since you get everything as dynamically as possible from the API. You can use stateFormat or userReadings to display your important readings with a readable name. If vitoconnect_raw_readings is set, no mapping will be used.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
+        <li><i>vitoconnect_gw_readings</i>:<br>         
+            Create readings from the gateway, including information if you have more than one gateway.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_actions_active"></a>
+        <li><i>vitoconnect_actions_active</i>:<br>
+            Create readings for actions, e.g., 'heating.circuits.0.heating.curve.setCurve.setURI'.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_mappings"></a>
+        <li><i>vitoconnect_mappings</i>:<br>
+            Define your own mapping of key-value pairs instead of using the built-in ones. The format has to be:<br>
+            mapping<br>
+            {  'device.serial.value' => 'device_serial',<br>
+                'heating.boiler.sensors.temperature.main.status' => 'status',<br>
+                'heating.boiler.sensors.temperature.main.value' => 'haupt_temperatur'}<br>
+            Mapping will be preferred over old mapping.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_translations"></a>
+        <li><i>vitoconnect_translations</i>:<br>
+            Define your own translation; it will translate every word part by part. The format has to be:<br>
+            translation<br>
+            {  'device' => 'gerät',<br>
+                'messages' => 'nachrichten',<br>
+                'errors' => 'fehler'}<br>
+            Translation will be preferred over mapping and old mapping.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_mapping_roger"></a>
+        <li><i>vitoconnect_mapping_roger</i>:<br>
+            Use the mapping from Roger from 8. November (https://forum.fhem.de/index.php?msg=1292441) instead of the SVN mapping.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_serial"></a>
+        <li><i>vitoconnect_serial</i>:<br>
+            Define the serial of the gateway to be used. If there is only one gateway, you do not have to care about it. If you have more than one gateway, by default all readings of all gateways are collected, and every reading is appended by the gateway serial. For example, if you have two gateways, this will be two calls to the API. The Viessmann API has a limit of 1400 calls a day. It makes sense in a hybrid setup to define two devices for every gateway. With this, you can get the data of the heat pump more frequently than the data of the burner. You can get the serials by setting vitoconnect_gw_readings = 1 and checking the corresponding readings gw and number_of_gateways.
+            
+            If you want to use the setters, please set a vitoconnect_serial. If not, you will get an error message in Aktion_Status to do so.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_timeout"></a>
+        <li><i>vitoconnect_timeout</i>:<br>
+            Sets a timeout for the API call.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_device"></a>
+        <li><i>vitoconnect_device</i>:<br>
+            You can define the device 0 (standard) or 1. I cannot test this because I have only one device.
+        </li>
+    </ul>
 </ul>
 
 =end html
+=begin html_DE
+
+<a id="vitoconnect"></a>
+<h3>vitoconnect</h3>
+<ul>
+    <i>vitoconnect</i> implementiert ein Gerät für die Viessmann API
+    <a href="https://www.viessmann.de/de/viessmann-apps/vitoconnect.html">Vitoconnect100</a>
+    basierend auf der Untersuchung von
+    <a href="https://github.com/thetrueavatar/Viessmann-Api">thetrueavatar</a><br>
+    
+    Sie benötigen Benutzer und Passwort des ViCare App-Kontos.<br>
+     
+    Für Details siehe: <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (deutsch)</a><br><br>
+     
+    vitoconnect benötigt die folgenden Bibliotheken:
+    <ul>
+    <li>Path::Tiny</li>
+    <li>JSON</li>
+    <li>JSON:XS</li>
+    <li>DateTime</li>
+    </ul>   
+         
+    Verwenden Sie <code>sudo apt install libtypes-path-tiny-perl libjson-perl libdatetime-perl</code> oder 
+    installieren Sie die Bibliotheken über cpan. 
+    Andernfalls erhalten Sie eine Fehlermeldung "cannot load module vitoconnect".
+     
+    <br><br>
+    <a id="vitoconnect-define"></a>
+    <b>Define</b>
+    <ul>
+        <code>define &lt;name&gt; vitoconnect &lt;user&gt; &lt;password&gt; &lt;interval&gt;</code><br>
+        Es ist eine gute Idee, hier ein falsches Passwort zu verwenden und das richtige später zu setzen, da es
+        in der Detailansicht des Geräts lesbar ist.
+        <br><br>
+        Beispiel:<br>
+        <code>define vitoconnect vitoconnect user@mail.xx fakePassword 60</code><br>
+        <code>set vitoconnect password correctPassword 60</code>
+        <br><br>
+                
+    </ul>
+    <br>
+    
+    <a id="vitoconnect-set"></a>
+    <b>Set</b><br>
+    <ul>
+        <a id="vitoconnect-set-update"></a>
+        <li><code>update</code><br>
+            Lese sofort die aktuellen Werte aus</li>
+        <a id="vitoconnect-set-clearReadings"></a>
+        <li><code>clearReadings</code><br>
+            Lösche sofort alle Werte</li> 
+        <a id="vitoconnect-set-password"></a>
+        <li><code>password passwd</code><br>
+            Speichere das Passwort im Schlüsselbund</li>
+        <a id="vitoconnect-set-logResponseOnce"></a>
+        <li><code>logResponseOnce</code><br>
+            Speichert die JSON-Antwort des Viessmann-Servers in entities.json,
+            gw.json, actions.json im FHEM-Log-Verzeichnis.
+            Wenn Sie mehr als ein Gateway haben, wird die Gateway-Seriennummer an die Dateien angehängt.</li>
+        <a id="vitoconnect-set-apiKey"></a>
+        <li><code>apiKey</code><br>
+            Da Viessmann auf die V2 API umgestellt hat, müssen Sie einen API-Schlüssel unter https://developer.viessmann.com/ erstellen.
+            Erstellen Sie ein Konto, fügen Sie einen neuen Client hinzu (Google reCAPTCHA deaktiviert, Redirect URI = http://localhost:4200/).
+            Kopieren Sie die Client-ID hier als apiKey</li>
+        <br>
+        <code>Neue Setter werden verwendet, wenn vitoconnect_raw_readings = 1, wenn Sie mehr als eine Gateway-Seriennummer haben, müssen Sie diese definieren, um die Setter zu verwenden<code>
+        <code>Alte statische Mapping-Setter, werden nur verwendet, wenn attr vitoconnect_raw_readings = 0<code>
+        <li><code>HKn_Heizkurve_Niveau shift</code><br>
+            Setzt die Verschiebung der Heizkurve für HKn</li>
+        <li><code>HKn_Heizkurve_Steigung slope</code><br>
+            Setzt die Steigung der Heizkurve für HKn</li>
+      
+        <li><code>HKn_Urlaub_Start_Zeit start</code><br>
+            Setzt die Urlaubsstartzeit für HKn<br>
+            Start muss so aussehen: 2019-02-02</li>
+        <li><code>HKn_Urlaub_Ende_Zeit end</code><br>
+            Setzt die Urlaubsendzeit für HKn<br>
+            Ende muss so aussehen: 2019-02-16</li>
+        <li><code>HKn_Urlaub_stop</code> <br>
+            Entfernt die Urlaubsstart- und Endzeit für HKn</li>
+            
+        <li><code>HKn_Zeitsteuerung_Heizung schedule</code><br>
+            Setzt den Heizplan für HKn im JSON-Format <br>
+            z.B. {"mon":[],"tue":[],"wed":[],"thu":[],"fri":[],"sat":[],"sun":[]} ist komplett aus
+            und {"mon":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
+            "tue":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
+            "wed":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
+            "thu":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
+            "fri":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
+            "sat":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
+            "sun":[{"mode":"on","start":"00:00","end":"24:00","position":0}]} ist 24/7 an</li>
+
+        <li><code>HKn_Betriebsart heating,standby</code> <br>
+             Setzt HKn_Betriebsart auf heizen, standby</li>
+
+        <li><code>WW_Betriebsart balanced,off</code> <br>
+            Setzt WW_Betriebsart auf ausgeglichen, aus</li>
+        
+        <li><code>HKn_Soll_Temp_comfort_aktiv activate,deactivate</code> <br>
+            Aktiviert/deaktiviert die Komforttemperatur für HKn</li>
+        <li><code>HKn_Soll_Temp_comfort targetTemperature</code><br>
+            Setzt die Komfortzieltemperatur für HKn</li>
+        <li><code>HKn_Soll_Temp_eco_aktiv activate,deactivate </code><br>
+            Aktiviert/deaktiviert die Ökotemperatur für HKn</li>
+            
+        <li><code>HKn_Soll_Temp_normal targetTemperature</code><br>
+            Setzt die normale Zieltemperatur für HKn, wobei targetTemperature ein
+            Integer zwischen 3 und 37 ist</li>
+        <li><code>HKn_Soll_Temp_reduziert targetTemperature</code><br>
+            Setzt die reduzierte Zieltemperatur für HKn, wobei targetTemperature ein
+            Integer zwischen 3 und 37 ist</li>
+        
+        <li><code>HKn_Name name</code><br>
+            Setzt den Namen des Kreislaufs für HKn</li>      
+        
+        <li><code>WW_einmaliges_Aufladen activate,deactivate</code><br>
+            Aktiviert oder deaktiviert einmaliges Aufladen für Warmwasser</li>
+        
+        <li><code>WW_Zirkulationspumpe_Zeitplan schedule</code><br>
+            Setzt den Zeitplan im JSON-Format für die Warmwasserzirkulationspumpe</li>
+        <li><code>WW_Zeitplan schedule</code> <br>
+            Setzt den Zeitplan im JSON-Format für Warmwasser</li>
+            
+        # <li><code>WW_Haupttemperatur targetTemperature</code><br>
+        # targetTemperature ist ein Integer zwischen 10 und 60<br>
+        # Setzt die Haupttemperatur des Warmwassers auf targetTemperature</li>
+        <li><code>WW_Solltemperatur targetTemperature</code><br>
+            targetTemperature ist ein Integer zwischen 10 und 60<br>
+            Setzt die Warmwassertemperatur auf targetTemperature</li>    
+        
+        <li><code>Urlaub_Start_Zeit start</code><br>
+            Setzt die Urlaubsstartzeit <br>
+            Start muss so aussehen: 2019-02-02</li>
+        <li><code>Urlaub_Ende_Zeit end</code><br>
+            Setzt die Urlaubsendzeit <br>
+            Ende muss so aussehen: 2019-02-16</li>
+        <li><code>Urlaub_stop</code> <br>
+            Entfernt die Urlaubsstart- und Endzeit</li>
+    </ul>
+</ul>
+<br>
+    <a name="vitoconnectget"></a>
+      <b>Get</b><br>
+        <ul>
+            nichts zum Abrufen hier
+        </ul>
+<br>
+
+<a name="vitoconnect-attr"></a>
+<b>Attributes</b>
+<ul>
+    <code>attr &lt;name&gt; &lt;attribute&gt; &lt;value&gt;</code>
+    <br><br>
+    Siehe <a href="http://fhem.de/commandref.html#attr">commandref#attr</a> für weitere Informationen über den attr-Befehl.
+    <br><br>
+    Attribute:
+    <ul>
+        <a id="vitoconnect-attr-disable"></a>
+        <li><i>disable</i>:<br>         
+            Stoppt die Kommunikation mit dem Viessmann-Server.
+        </li>
+        <a id="vitoconnect-attr-verbose"></a>
+        <li><i>verbose</i>:<br>         
+            Setzt das Verbositätslevel.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
+        <li><i>vitoconnect_raw_readings</i>:<br>         
+            Erstellt Readings mit einfachen JSON-Namen wie 'heating.circuits.0.heating.curve.slope' anstelle von deutschen Bezeichnern (altes Mappping), mapping Attribute, oder translation Attribute. Werden raw Readings verwenbdet werden die setter dynamisch erstellt, die den raw Readings entsprechen (neu). Ich empfehle diese Einstellung, da Sie alles so dynamisch wie möglich von der API erhalten. Sie können stateFormat oder userReadings verwenden, um Ihre wichtigen Readings mit einem lesbaren Namen anzuzeigen. Wenn vitoconnect_raw_readings gesetzt ist, wird kein Mapping verwendet.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
+        <li><i>vitoconnect_gw_readings</i>:<br>         
+            Erstellt ein Reading vom Gateway, einschließlich Informationen, wenn Sie mehr als ein Gateway haben.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_actions_active"></a>
+        <li><i>vitoconnect_actions_active</i>:<br>
+            Erstellt Readings für Aktionen, z.B. 'heating.circuits.0.heating.curve.setCurve.setURI'.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_mappings"></a>
+        <li><i>vitoconnect_mappings</i>:<br>
+            Definieren Sie Ihre eigene Zuordnung von Schlüssel-Wert-Paaren anstelle der eingebauten. Das Format muss sein:<br>
+            mapping<br>
+            {  'device.serial.value' => 'device_serial',<br>
+                'heating.boiler.sensors.temperature.main.status' => 'status',<br>
+                'heating.boiler.sensors.temperature.main.value' => 'haupt_temperatur'}<br>
+            Die Zuordnung wird gegenüber der alten Zuordnung bevorzugt.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_translations"></a>
+        <li><i>vitoconnect_translations</i>:<br>
+            Definieren Sie Ihre eigene Übersetzung; sie wird jedes Wort Teil für Teil übersetzen. Das Format muss sein:<br>
+            translation<br>
+            {  'device' => 'gerät',<br>
+                'messages' => 'nachrichten',<br>
+                'errors' => 'fehler'}<br>
+            Die Übersetzung wird gegenüber der Zuordnung und der alten Zuordnung bevorzugt.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_mapping_roger"></a>
+        <li><i>vitoconnect_mapping_roger</i>:<br>
+            Verwenden Sie das Mapping von Roger vom 8. November (https://forum.fhem.de/index.php?msg=1292441) anstelle der SVN-Zuordnung.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_serial"></a>
+        <li><i>vitoconnect_serial</i>:<br>
+            Definieren Sie die Seriennummer des zu verwendenden Gateways. Wenn es nur ein Gateway gibt, müssen Sie sich nicht darum kümmern. Wenn Sie mehr als ein Gateway haben, werden standardmäßig alle Messwerte aller Gateways gesammelt, und jeder Messwert wird mit der Gateway-Seriennummer versehen. Wenn Sie beispielsweise zwei Gateways haben, werden zwei API-Aufrufe durchgeführt. Die Viessmann-API hat ein Limit von 1400 Aufrufen pro Tag. Es macht in einem hybriden Setup Sinn, zwei Geräte für jedes Gateway zu definieren. Damit können Sie die Daten der Wärmepumpe häufiger als die Daten des Brenners abrufen. Sie können die Seriennummern erhalten, indem Sie vitoconnect_gw_readings = 1 setzen und die entsprechenden Readings gw und number_of_gateways überprüfen.
+            
+            Wenn Sie die Setter verwenden möchten, setzen Sie bitte eine vitoconnect_serial. Andernfalls erhalten Sie eine Fehlermeldung in Aktion_Status, dies zu tun.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_timeout"></a>
+        <li><i>vitoconnect_timeout</i>:<br>
+            Setzt ein Timeout für den API-Aufruf.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_device"></a>
+        <li><i>vitoconnect_device</i>:<br>
+            Sie können das Gerät 0 (Standard) oder 1 definieren. Ich kann dies nicht testen, da ich nur ein Gerät habe.
+        </li>
+    </ul>
+</ul>
+
+=end html_DE
 
 =for :application/json;q=META.json 98_vitoconnect.pm
 {
