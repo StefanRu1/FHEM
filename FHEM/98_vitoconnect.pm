@@ -323,6 +323,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.3.0"  => "18.12.2024  Fix setter new for cases where more than one gateway is actively pulled in 2 devices.".
   "0.2.1"  => "16.12.2024  German and English texts in UI".
   "0.2.0"  => "14.12.2024  FVersion introduced, a bit of code beautifying".
                           "sort keys per reading to ensure power readings are in the right order, day before dayvalue",
@@ -341,7 +342,7 @@ my $iotURL_V2     = "https://api.viessmann.com/iot/v2/features/";
 
 my $RequestListMapping; # Über das Attribut Mapping definierte Readings zum überschreiben der RequestList
 my %translations;       # Über das Attribut translations definierte Readings zum überschreiben der RequestList
-my $Response;           # Gespeicherts JSON um dynamische Setter zu erstellen
+#my $Response;           # Gespeicherts JSON um dynamische Setter zu erstellen
 
 
 
@@ -1590,14 +1591,16 @@ sub vitoconnect_Set_New {
     
     my $gwaCount = scalar @gwa;
     if ($gwaCount == 0) {
-        readingsSingleUpdate($hash,"Aktion_Status","Warnung: Gateway noch nicht eingelesen. Entweder bis zum ersten Update warten oder mit logResponseOnce einlesen",1);    # Reading 'Aktion_Status' setzen
+        #readingsSingleUpdate($hash,"Aktion_Status","Warnung: Gateway noch nicht eingelesen. Entweder bis zum ersten Update warten oder mit logResponseOnce einlesen",1);    # Reading 'Aktion_Status' setzen
     } elsif ($gwaCount > 1) {
         readingsSingleUpdate($hash,"Aktion_Status","Fehler: Mehr als ein Gateway. Für Setter bitte eine Serial in vitoconnect_serial vorgeben.",1); # Reading 'Aktion_Status' setzen
     } else {
-        readingsSingleUpdate($hash,"Aktion_Status","ready",1);  # Reading 'Aktion_Status' setzen
+       if ($hash->{"Aktion_Status"} =~ /^OK:/) {
+        readingsSingleUpdate($hash,"Aktion_Status","OK:ready",1);  # Reading 'Aktion_Status' setzen
+       }
     }
     
-
+    my $Response = $hash->{".response_$gw"};
     if ($gwaCount == 1 && $Response) {  # Überprüfen, ob $Response Daten enthält
         my $data;
         eval { $data = decode_json($Response); };
@@ -3790,8 +3793,6 @@ sub vitoconnect_getResourceCallback {
     my @gwa    = @{$hash->{".gwa"}};
     my $gwFilter = $hash->{".gw"};
     
-    $Response = $response_body;
-
     Log(5,$name.", -getResourceCallback started");
     
     if (defined($gwFilter) && $gwFilter ne "") {
@@ -3831,6 +3832,9 @@ sub vitoconnect_getResourceCallback {
             $hash->{".logResponseOnce"} = 0;
             }
         }
+        
+        $hash->{".response_$gw"} = $response_body;
+        #$Response = $response_body;
         
         my $gwaCount = scalar @gwa;
         
