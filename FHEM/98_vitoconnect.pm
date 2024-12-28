@@ -323,7 +323,11 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
-  "0.3.0"  => "18.12.2024  Fix setter new for cases where more than one gateway is actively pulled in 2 devices.".
+  "0.4.0"  => "28.12.2024  Fixed setNew to work again automatically in case of one serial in gateways,".
+                           "for more than one serial you have to define the serial you want to use".
+  "0.3.2"  => "27.12.2024  Set in case of activate and deactivate request the active value of the reading".
+  "0.3.1"  => "19.12.2024  New attribute vitoconnect_disable_raw_readings".
+  "0.3.0"  => "18.12.2024  Fix setter new for cases where more than one gateway is actively pulled in 2 devices.",
   "0.2.1"  => "16.12.2024  German and English texts in UI".
   "0.2.0"  => "14.12.2024  FVersion introduced, a bit of code beautifying".
                           "sort keys per reading to ensure power readings are in the right order, day before dayvalue",
@@ -1486,6 +1490,7 @@ sub vitoconnect_Initialize {
 #      . "Vitoligno_300-C,Vitoligno_200-S,Vitoligno_300-P_mit_Vitotronic_200_(FO1),Vitoligno_250-S,"
 #      . "Vitoligno_300-S "
       . "vitoconnect_raw_readings:0,1 "         # Liefert nur die raw readings und verhindert das mappen wenn gesetzt
+      . "vitoconnect_disable_raw_readings:0,1 " # Wird ein mapping verwendet können die weiteren RAW Readings ausgeblendet werden
       . "vitoconnect_gw_readings:0,1 "          # Schreibt die GW readings als Reading ins Device
       . "vitoconnect_actions_active:0,1 "
       . "vitoconnect_device:0,1 "               # Hier kann Device 0 oder 1 angesprochen worden, default ist 0 und ich habe keinen GW mit Device 1
@@ -1578,18 +1583,24 @@ sub vitoconnect_Set_New {
     my $gw           = $hash->{".gw"};
     
     my $val = "unknown value $opt, choose one of update:noArg clearReadings:noArg password apiKey logResponseOnce:noArg ";
-    Log(5,$name.", -set started: ". $opt);
+    Log(5,$name.", -vitoconnect_Set_New started: ". $opt); #debug
     
+	my $string = "";
     my @gwa = ();
     if (defined($gwatemp) && $gwatemp ne "") {
+      $string = join(", ", @{$gwatemp});
+      Log(5,$name.", -vitoconnect_Set_New gwatemp: ". $string); #debug
       @gwa = @{$gwatemp};
     }
     if (defined($gw) && $gw ne "") {
-        Log(5,$name.", - vitoconnect_Set_New Resource gw found reduce gwa: ".$gw);
+        Log(5,$name.", - vitoconnect_Set_New Resource gw found reduce gwa: ".$gw); #debug
         @gwa = $gw;
     }
     
     my $gwaCount = scalar @gwa;
+    Log(5,$name.", - vitoconnect_Set_New Resource gwaCount: ".$gwaCount); #debug
+    $string = join(", ", @gwa);
+    Log(5,$name.", - vitoconnect_Set_New Resource gwa: ".$string); #debug
     if ($gwaCount == 0) {
         #readingsSingleUpdate($hash,"Aktion_Status","Warnung: Gateway noch nicht eingelesen. Entweder bis zum ersten Update warten oder mit logResponseOnce einlesen",1);    # Reading 'Aktion_Status' setzen
     } elsif ($gwaCount > 1) {
@@ -1600,7 +1611,7 @@ sub vitoconnect_Set_New {
        }
     }
     
-    my $Response = $hash->{".response_$gw"};
+    my $Response = $hash->{".response_$gwa[0]"};
     if ($gwaCount == 1 && $Response) {  # Überprüfen, ob $Response Daten enthält
         my $data;
         eval { $data = decode_json($Response); };
@@ -2893,6 +2904,13 @@ sub vitoconnect_Attr {
                 return $err;
             }
         }
+        elsif ($attr_name eq "vitoconnect_disable_raw_readings")     {
+            if ( $attr_value !~ /^0|1$/ ) {
+                my $err = "Invalid argument ".$attr_value." to ".$attr_name.". Must be 0 or 1.";
+                Log(1,$name.", vitoconnect_Attr: ".$err);
+                return $err;
+            }
+        }
         elsif ($attr_name eq "vitoconnect_gw_readings")     {
             if ( $attr_value !~ /^0|1$/ ) {
                 my $err = "Invalid argument ".$attr_value." to ".$attr_name.". Must be 0 or 1.";
@@ -3896,6 +3914,11 @@ sub vitoconnect_getResourceCallback {
                     $Reading = $feature->{feature} . "." . $key;
                 }
                 
+                if ( !defined($Reading) && AttrVal( $name, 'vitoconnect_disable_raw_readings', 0 ) eq "1" )
+                {   
+                    next;
+                }
+                
                 # If no serial is defined and there is more than one gateway add the gateway serial to the readings
                 if ($gwaCount > 1) {
                  $Reading = $Reading ."_". $gw;
@@ -4124,8 +4147,17 @@ sub vitoconnect_action {
     }
     else                                                                {   # Befehl korrekt ausgeführt
         readingsSingleUpdate($hash,"Aktion_Status","OK: ".$opt." ".$Text,1);    # Reading 'Aktion_Status' setzen
+        
+        # Spezial Readings update
+        if ($opt =~ /(.*)\.deactivate/) {
+            $opt = $1 . ".active";
+            $Text = "0";
+        } elsif ($opt =~ /(.*)\.activate/) {
+            $opt = $1 . ".active";
+            $Text = "1";
+        }
         readingsSingleUpdate($hash,$opt,$Text,1);   # Reading updaten
-        Log3($name,3,$name.",vitoconnect_action: set ".$name." ".$opt." ".$Text.", korrekt ausgefuehrt");
+        Log3($name,3,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt");
     }
     return;
 }
@@ -4383,6 +4415,12 @@ sub vitoconnect_ReadKeyValue {
             You can use stateFormat or userReadings to display your important readings with a readable name.<br>
             If vitoconnect_raw_readings is set, no mapping will be used.
         </li>
+        <a id="vitoconnect-attr-vitoconnect_disable_raw_readings"></a>
+        <li><i>vitoconnect_disable_raw_readings</i>:<br>         
+            This setting will disable the additional generation of raw readings.<br>
+            This means you will only see the readings which are explicitly mapped in your choosen mapping.<br>
+            This setting will not be active if you also choose vitoconnect_raw_readings = 1.
+        </li>
         <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
         <li><i>vitoconnect_gw_readings</i>:<br>         
             Create readings from the gateway, including information if you have more than one gateway.
@@ -4606,10 +4644,16 @@ sub vitoconnect_ReadKeyValue {
         <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
         <li><i>vitoconnect_raw_readings</i>:<br>         
             Erstellt Readings mit einfachen JSON-Namen wie 'heating.circuits.0.heating.curve.slope' anstelle von deutschen Bezeichnern (altes Mappping), mapping Attribute, oder translation Attribute.<br>
-            Werden raw Readings verwenbdet werden die setter dynamisch erstellt, die den raw Readings entsprechen (neu).<br>
+            Werden raw Readings verwendet werden die setter dynamisch erstellt, die den raw Readings entsprechen (neu).<br>
             Ich empfehle diese Einstellung, da Sie alles so dynamisch wie möglich von der API erhalten.<br>
             Sie können stateFormat oder userReadings verwenden, um Ihre wichtigen Readings mit einem lesbaren Namen anzuzeigen.<br>
             Wenn vitoconnect_raw_readings gesetzt ist, wird kein Mapping verwendet.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_disable_raw_readings"></a>
+        <li><i>vitoconnect_disable_raw_readings</i>:<br>
+            Diese Einstellung deaktiviert die zusätzliche Generierung von raw Readings.<br>
+            Das bedeutet, dass du nur die Messwerte siehst, die in deinem gewählten Mapping explizit zugeordnet sind.<br>
+            Diese Einstellung ist nicht aktiv, wenn du auch vitoconnect_raw_readings = 1 auswählst.
         </li>
         <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
         <li><i>vitoconnect_gw_readings</i>:<br>         
