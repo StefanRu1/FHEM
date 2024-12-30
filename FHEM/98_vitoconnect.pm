@@ -323,12 +323,13 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.4.1"  => "30.12.2024  Bug fixes, fixed Releasenotes, changed debugging texts and messages in Set_New",
   "0.4.0"  => "28.12.2024  Fixed setNew to work again automatically in case of one serial in gateways,".
-                           "for more than one serial you have to define the serial you want to use".
-  "0.3.2"  => "27.12.2024  Set in case of activate and deactivate request the active value of the reading".
-  "0.3.1"  => "19.12.2024  New attribute vitoconnect_disable_raw_readings".
+                           "for more than one serial you have to define the serial you want to use",
+  "0.3.2"  => "27.12.2024  Set in case of activate and deactivate request the active value of the reading",
+  "0.3.1"  => "19.12.2024  New attribute vitoconnect_disable_raw_readings",
   "0.3.0"  => "18.12.2024  Fix setter new for cases where more than one gateway is actively pulled in 2 devices.",
-  "0.2.1"  => "16.12.2024  German and English texts in UI".
+  "0.2.1"  => "16.12.2024  German and English texts in UI",
   "0.2.0"  => "14.12.2024  FVersion introduced, a bit of code beautifying".
                           "sort keys per reading to ensure power readings are in the right order, day before dayvalue",
   "0.1.1"  => "12.12.2024  In case of more than one Gateway only allow Set_New if serial is provided. ".
@@ -1603,10 +1604,11 @@ sub vitoconnect_Set_New {
     Log(5,$name.", - vitoconnect_Set_New Resource gwa: ".$string); #debug
     if ($gwaCount == 0) {
         #readingsSingleUpdate($hash,"Aktion_Status","Warnung: Gateway noch nicht eingelesen. Entweder bis zum ersten Update warten oder mit logResponseOnce einlesen",1);    # Reading 'Aktion_Status' setzen
+        return $val;
     } elsif ($gwaCount > 1) {
         readingsSingleUpdate($hash,"Aktion_Status","Fehler: Mehr als ein Gateway. Für Setter bitte eine Serial in vitoconnect_serial vorgeben.",1); # Reading 'Aktion_Status' setzen
     } else {
-       if ($hash->{"Aktion_Status"} =~ /^OK:/) {
+       if (defined($hash->{"Aktion_Status"}) && $hash->{"Aktion_Status"} =~ /^OK:/) {
         readingsSingleUpdate($hash,"Aktion_Status","OK:ready",1);  # Reading 'Aktion_Status' setzen
        }
     }
@@ -1624,7 +1626,7 @@ sub vitoconnect_Set_New {
 
             if (exists $item->{commands}) {
                 my $feature = $item->{feature};
-                Log(5,$name.", -set feature: ". $feature);
+                Log(5,$name.",vitoconnect_Set_New feature: ". $feature);
 
                 foreach my $commandName (keys %{$item->{commands}}) {           #<====== Loop Commands
                     my $commandNr = keys %{$item->{commands}};
@@ -1632,19 +1634,22 @@ sub vitoconnect_Set_New {
                     my $propertyKeysNr = keys %{$item->{properties}};
                     my $paramNr = keys %{$item->{commands}{$commandName}{params}};
                     
-                    Log(5,$name.", -set isExecutable: ". $item->{commands}{$commandName}{isExecutable}); 
+                    Log(5,$name.", -vitoconnect_Set_New isExecutable: ". $item->{commands}{$commandName}{isExecutable}); 
                     if ($item->{commands}{$commandName}{isExecutable} == 0) {
-                    Log(5,$name.", -set $commandName nicht ausführbar"); 
+                    Log(5,$name.", -vitoconnect_Set_New $commandName nicht ausführbar"); 
                      next; #diser Befehl ist nicht ausführbar, nächster 
                     }
 
-                    Log(5,$name.", -set commandNr: ". $commandNr); 
-                    Log(5,$name.", -set commandname: ". $commandName); 
+                    Log(5,$name.", -vitoconnect_Set_New feature: ". $feature);
+                    Log(5,$name.", -vitoconnect_Set_New commandNr: ". $commandNr); 
+                    Log(5,$name.", -vitoconnect_Set_New commandname: ". $commandName); 
                     my $readingNamePrep;
                     if ($commandNr == 1 and $propertyKeysNr == 1) {               # Ein command value = property z.B. heating.circuits.0.operating.modes.active
                      $readingNamePrep .= $feature.".". $propertyKeys[0];
                     } elsif ( $commandName eq "setTemperature" ) {
-                        $readingNamePrep .= $feature.".temperature";              #<------- setTemperature only 1 param, so it can be defined here
+                        $readingNamePrep .= $feature.".temperature";              #<------- setTemperature only 1 param, so it can be defined here, 
+                                                                                  # activate (temperature), deactivate(noArg), setTemperature (targetTemperature) only one can work with value provided
+                                                                                  # Activate should work, and is, but not garantued since no ordered JSON.
                     } elsif ( $commandName eq "setHysteresis" ) {                 #<------- setHysteresis very special mapping, must be predefined
                         $readingNamePrep .= $feature.".value";
                     } elsif ( $commandName eq "setHysteresisSwitchOnValue" ) {    #<------- setHysteresis very special mapping, must be predefined
@@ -1666,13 +1671,13 @@ sub vitoconnect_Set_New {
                     }
                     if(defined($readingNamePrep))
                     {
-                    Log(5,$name.", -set readingNamePrep: ". $readingNamePrep); 
+                    Log(5,$name.", -vitoconnect_Set_New readingNamePrep: ". $readingNamePrep); 
                     }
 
                     if ($paramNr > 2) {                                          #<------- more then 2 parameters, with unsorted JSON can not be handled, but also do not exist at the moment
-                        Log(5,$name.", -set mehr als 2 Parameter in Command $commandName, kann nicht berechnet werden"); 
+                        Log(5,$name.", -vitoconnect_Set_New mehr als 2 Parameter in Command $commandName, kann nicht berechnet werden"); 
                         next;
-                    } elsif ($paramNr == 0){                                     #<------- mo parameters, create here, param loop will not be executed
+                    } elsif ($paramNr == 0){                                     #<------- no parameters, create here, param loop will not be executed
                         $readingNamePrep .= $feature.".".$commandName;
                         $val .= "$readingNamePrep:noArg ";
                         
@@ -1680,7 +1685,7 @@ sub vitoconnect_Set_New {
                         if ($opt eq $readingNamePrep) {
                             my $uri = $item->{commands}->{$commandName}->{'uri'};
                             my ($shortUri) = $uri =~ m|.*features/(.*)|; #<=== URI ohne gateway zeug
-                           Log(5,$name.", -set short uri: ".$shortUri);
+                            Log(4,$name.", -vitoconnect_Set_New, 0 param, short uri: ".$shortUri);
                             vitoconnect_action($hash,
                                 $shortUri,
                                 "{}",
@@ -1723,9 +1728,9 @@ sub vitoconnect_Set_New {
                         elsif ($param->{'type'} eq 'string') {
                             if ($commandName eq "setMode") {
                               my $enum = $param->{constraints}->{'enum'};
-                              Log(5,$name.", -set enum: ". $enum); 
+                              Log(5,$name.", -vitoconnect_Set_New enum: ". $enum); 
                               my $enumNr = scalar @$enum;
-                              Log(5,$name.", -set enumNr: ". $enumNr); 
+                              Log(5,$name.", -vitoconnect_Set_New enumNr: ". $enumNr); 
                             
                               my $i = 1;
                               $val .= $readingName.":";
@@ -1748,9 +1753,10 @@ sub vitoconnect_Set_New {
                         } else {
                             # Ohne type direkter befehl ohne args
                             $val .= "$readingName:noArg ";
-                            Log(5,$name.", -set unknown type: ".$readingName);
+                            Log(5,$name.", -vitoconnect_Set_New unknown type: ".$readingName);
                         }
                         
+                        Log(5,$name.", -vitoconnect_Set_New exec, opt:".$opt.", readingName:".$readingName);
                         # Set execution
                         if ($opt eq $readingName) {
                             
@@ -1775,12 +1781,12 @@ sub vitoconnect_Set_New {
                             $data .= $otherData . '}';
                             my $uri = $item->{commands}->{$commandName}->{'uri'};
                             my ($shortUri) = $uri =~ m|.*features/(.*)|; #<=== URI ohne gateway zeug
+                            Log(4,$name.", -vitoconnect_Set_New, short uri:".$shortUri.", data:".$data);
                             vitoconnect_action($hash,
                                 $shortUri,
                                 $data,
                                 $name, $opt, @args
                             );
-                            Log(5,$name.", -set data: ".$data);
                             return;
                         }
                     }
@@ -1816,8 +1822,8 @@ sub vitoconnect_Set_New {
     }
     
     # Rückgabe der dynamisch erstellten $val Variable
-    Log(5,$name.", -set val: ". $val);
-    Log(5,$name.", -set ended ");
+    Log(5,$name.", -vitoconnect_Set_New val: ". $val);
+    Log(5,$name.", -vitoconnect_Set_New ended ");
     
     #vitoconnect_check_gwa_and_get_gw($hash,$name);
     
@@ -4157,7 +4163,8 @@ sub vitoconnect_action {
             $Text = "1";
         }
         readingsSingleUpdate($hash,$opt,$Text,1);   # Reading updaten
-        Log3($name,3,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt");
+        Log3($name,3,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt"); #3
+        Log3($name,4,$name.",vitoconnect_action: set feature:".$feature." data:".$data.", korrekt ausgefuehrt"); #4
     }
     return;
 }
