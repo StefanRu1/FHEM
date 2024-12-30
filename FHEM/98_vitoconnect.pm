@@ -323,6 +323,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.4.2"  => "31.12.2024  Small fix for Vitoladens 300C, heating.circuits.0.operating.programs.comfort",
   "0.4.1"  => "30.12.2024  Bug fixes, fixed Releasenotes, changed debugging texts and messages in Set_New",
   "0.4.0"  => "28.12.2024  Fixed setNew to work again automatically in case of one serial in gateways,".
                            "for more than one serial you have to define the serial you want to use",
@@ -1628,7 +1629,7 @@ sub vitoconnect_Set_New {
                 my $feature = $item->{feature};
                 Log(5,$name.",vitoconnect_Set_New feature: ". $feature);
 
-                foreach my $commandName (keys %{$item->{commands}}) {           #<====== Loop Commands
+                foreach my $commandName (sort keys %{$item->{commands}}) {           #<====== Loop Commands, sort necessary for activate temperature for burners, see below
                     my $commandNr = keys %{$item->{commands}};
                     my @propertyKeys = keys %{$item->{properties}};
                     my $propertyKeysNr = keys %{$item->{properties}};
@@ -1648,8 +1649,9 @@ sub vitoconnect_Set_New {
                      $readingNamePrep .= $feature.".". $propertyKeys[0];
                     } elsif ( $commandName eq "setTemperature" ) {
                         $readingNamePrep .= $feature.".temperature";              #<------- setTemperature only 1 param, so it can be defined here, 
+                                                                                  # for burner Vitoladens 300C, heating.circuits.0.operating.programs.comfort
                                                                                   # activate (temperature), deactivate(noArg), setTemperature (targetTemperature) only one can work with value provided
-                                                                                  # Activate should work, and is, but not garantued since no ordered JSON.
+                                                                                  # Activate should work, and is, since commands are sorted
                     } elsif ( $commandName eq "setHysteresis" ) {                 #<------- setHysteresis very special mapping, must be predefined
                         $readingNamePrep .= $feature.".value";
                     } elsif ( $commandName eq "setHysteresisSwitchOnValue" ) {    #<------- setHysteresis very special mapping, must be predefined
