@@ -323,6 +323,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.5.0"  => "02.01.2025  Added attribute installationID, in case you use two installations, see https://forum.fhem.de/index.php?msg=1329165",
   "0.4.2"  => "31.12.2024  Small fix for Vitoladens 300C, heating.circuits.0.operating.programs.comfort",
   "0.4.1"  => "30.12.2024  Bug fixes, fixed Releasenotes, changed debugging texts and messages in Set_New",
   "0.4.0"  => "28.12.2024  Fixed setNew to work again automatically in case of one serial in gateways,".
@@ -1491,12 +1492,13 @@ sub vitoconnect_Initialize {
 #      . "Vitotronic_300_(KW3),Vitotronic_200_(WO1A),Vitotronic_200_(WO1B),Vitotronic_200_(WO1C),"
 #      . "Vitoligno_300-C,Vitoligno_200-S,Vitoligno_300-P_mit_Vitotronic_200_(FO1),Vitoligno_250-S,"
 #      . "Vitoligno_300-S "
-      . "vitoconnect_raw_readings:0,1 "         # Liefert nur die raw readings und verhindert das mappen wenn gesetzt
-      . "vitoconnect_disable_raw_readings:0,1 " # Wird ein mapping verwendet können die weiteren RAW Readings ausgeblendet werden
-      . "vitoconnect_gw_readings:0,1 "          # Schreibt die GW readings als Reading ins Device
+      . "vitoconnect_raw_readings:0,1 "                 # Liefert nur die raw readings und verhindert das mappen wenn gesetzt
+      . "vitoconnect_disable_raw_readings:0,1 "         # Wird ein mapping verwendet können die weiteren RAW Readings ausgeblendet werden
+      . "vitoconnect_gw_readings:0,1 "                  # Schreibt die GW readings als Reading ins Device
       . "vitoconnect_actions_active:0,1 "
-      . "vitoconnect_device:0,1 "               # Hier kann Device 0 oder 1 angesprochen worden, default ist 0 und ich habe keinen GW mit Device 1
-      . "vitoconnect_serial:textField-long "    # Legt fest welcher Gateway abgefragt werden soll, wenn nicht gesetzt werden alle abgefragt
+      . "vitoconnect_device:0,1 "                       # Hier kann Device 0 oder 1 angesprochen worden, default ist 0 und ich habe keinen GW mit Device 1
+      . "vitoconnect_serial:textField-long "            # Legt fest welcher Gateway abgefragt werden soll, wenn nicht gesetzt werden alle abgefragt
+      . "vitoconnect_installationID:textField-long "    # Legt fest welche Installation abgefragt werden soll, muss zur serial passen
       . "vitoconnect_timeout:selectnumbers,10,1.0,30,0,lin "
       . $readingFnAttributes;
 
@@ -2964,6 +2966,14 @@ sub vitoconnect_Attr {
                 return $err;
             }
         }
+        elsif ($attr_name eq "vitoconnect_installationID")                      {
+            # Zur Zeit kein prüfung, einfacher String
+            if (length($attr_value) < 5)                      {
+                my $err = "Invalid argument ".$attr_value." to ".$attr_name.". Must be at least 5 characters long.";
+                Log(5,$name.", vitoconnect_Attr: ".$err);
+                return $err;
+            }
+        }
         elsif ($attr_name eq "disable")                     {
         }
         elsif ($attr_name eq "verbose")                     {
@@ -3390,7 +3400,16 @@ sub vitoconnect_getInstallationCallback {
             InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
         }
         else {
+            if ( defined(AttrVal( $name, 'vitoconnect_installationID', 0 )) 
+                 && AttrVal( $name, 'vitoconnect_installationID', 0 ) ne "" 
+                 && AttrVal( $name, 'vitoconnect_installationID', 0 ) != 0 )  {
+               $hash->{".installation"} = AttrVal( $name, 'vitoconnect_installationID', 0 );
+               Log3 $name, 5, "$name - getInstallationCallback installationID overwritten with: ".$hash->{".installation"};
+            } else {
             $hash->{".installation"} = $items->{data}[0]->{id};
+            }
+            Log3 $name, 5, "$name - getInstallationCallback installationID set with: ".$hash->{".installation"};
+            
             if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
                readingsSingleUpdate( $hash, "installation", $response_body, 1 );
             }
@@ -3631,6 +3650,8 @@ sub vitoconnect_getFeaturesCallback {
 sub vitoconnect_errorHandling {
     my ($hash,$items,$gw,$last) = @_;
     my $name         = $hash->{NAME};
+    
+    #Log3 $name, 1, "$name - errorHandling StatusCode: $items->{statusCode} ";
     
         if (!$items->{statusCode} eq "")    {
             Log3 $name, 4,
@@ -4147,7 +4168,7 @@ sub vitoconnect_action {
     (my $err,my $msg) = HttpUtils_BlockingGet($param);
     my $decode_json = eval {decode_json($msg)};
 
-    Log3($name,3,$name.", vitoconnect_action call finished err:" .$err);
+    Log3($name,3,$name.", vitoconnect_action call finished, err:" .$err);
     my $Text = join(' ',@args); # Befehlsparameter in Text
     if ( (defined($err) && $err ne "") || (defined($decode_json->{statusCode}) && $decode_json->{statusCode} ne "") )                   {   # Fehler bei Befehlsausführung
         readingsSingleUpdate($hash,"Aktion_Status","Fehler: ".$opt." ".$Text,1);    # Reading 'Aktion_Status' setzen
@@ -4155,6 +4176,8 @@ sub vitoconnect_action {
     }
     else                                                                {   # Befehl korrekt ausgeführt
         readingsSingleUpdate($hash,"Aktion_Status","OK: ".$opt." ".$Text,1);    # Reading 'Aktion_Status' setzen
+        #Log3($name,1,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt: ".$err." :: ".$msg); # TODO: Wieder weg machen $err
+        Log3($name,3,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt"); 
         
         # Spezial Readings update
         if ($opt =~ /(.*)\.deactivate/) {
@@ -4165,7 +4188,17 @@ sub vitoconnect_action {
             $Text = "1";
         }
         readingsSingleUpdate($hash,$opt,$Text,1);   # Reading updaten
-        Log3($name,3,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt"); #3
+        
+        # Spezial Readings update, activate mit temperatur siehe brenner Vitoladens300C
+        if ($feature =~ /(.*)\.deactivate/) {
+            # funktioniert da deactivate ohne temperatur gesendet wird
+        } elsif ($feature =~ /(.*)\/commands\/activate/) {
+            $opt = $1 . ".active";
+            $Text = "1";
+        }
+        readingsSingleUpdate($hash,$opt,$Text,1);   # Reading updaten
+		
+        
         Log3($name,4,$name.",vitoconnect_action: set feature:".$feature." data:".$data.", korrekt ausgefuehrt"); #4
     }
     return;
@@ -4473,6 +4506,14 @@ sub vitoconnect_ReadKeyValue {
             If you want to use the setters, please set a vitoconnect_serial.<br>
             If not, you will get an error message in Aktion_Status to do so.
         </li>
+        <a id="vitoconnect-attr-vitoconnect_installationID"></a>
+        <li><i>vitoconnect_installationID</i>:<br>
+            Define the installationID of your installation to be used. This must be the installationID corresponding to yourt given serial.<br>
+            If there is only one installationID, you do not have to care about it.<br>
+            If you have more than one installationID, you have to provide it together with the serial.<br>
+            This will be fixed in a feature release but for now you have to define the installationID if you have more than one.<br>
+            The data can be obtained from gw.json or installation.json.
+        </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
             Sets a timeout for the API call.
@@ -4706,6 +4747,14 @@ sub vitoconnect_ReadKeyValue {
             Sie können die Seriennummern erhalten, indem Sie vitoconnect_gw_readings = 1 setzen und die entsprechenden Readings gw und number_of_gateways überprüfen.<br>            
             Wenn Sie die Setter verwenden möchten, setzen Sie bitte eine vitoconnect_serial.<br>
             Andernfalls erhalten Sie eine Fehlermeldung in Aktion_Status, dies zu tun.
+        </li>
+        <a id="vitoconnect-attr-vitoconnect_installationID"></a>
+        <li><i>vitoconnect_installationID</i>:<br>
+            Definieren Sie die installationID Ihrer Installation, die verwendet werden soll. Dies muss die installationID sein, die Ihrer angegebenen Seriennummer entspricht.<br>
+            Wenn es nur eine installationID gibt, müssen Sie sich nicht darum kümmern.<br>
+            Wenn Sie mehr als eine installationID haben, müssen Sie diese zusammen mit der Seriennummer angeben.<br>
+            Dies wird in einem zukünftigen Feature-Release behoben, aber im Moment müssen Sie die installationID definieren, wenn Sie mehr als eine haben.<br>
+            Die Daten können aus gw.json oder installation.json bezogen werden.
         </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
