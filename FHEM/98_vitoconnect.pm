@@ -30,9 +30,9 @@ sub vitoconnect_Initialize;             # Modul initialisieren und Namen zusätz
 sub vitoconnect_Define;                 # wird beim 'define' eines Gerätes aufgerufen
 sub vitoconnect_Undef;                  # wird beim Löschen einer Geräteinstanz aufgerufen
 sub vitoconnect_Get;                    # bisher kein 'get' implementiert
-sub vitoconnect_check_gwa_and_get_gw;   # Nötig für Actions die nur mit einem gw laufen
+sub vitoconnect_Set;                    # Implementierung set-Befehle
 sub vitoconnect_Set_New;                # Implementierung set-Befehle New dynamisch auf raw readings
-sub vitoconnect_Set;                    # Implementierung set-Befehle SVN
+sub vitoconnect_Set_SVN;                # Implementierung set-Befehle SVN
 sub vitoconnect_Set_Roger;              # Implementierung set-Befehle Roger
 sub vitoconnect_Attr;                   # Attribute setzen/ändern/löschen
 
@@ -60,7 +60,6 @@ sub vitoconnect_getFeatures;            # Abruf GW Features
 sub vitoconnect_getFeaturesCallback;    # gw_features speichern
 
 sub vitoconnect_errorHandling;          # Errors bearbeiten für alle Calls
-sub vitoconnect_getResource_per_gw;     # API call per Gateway
 sub vitoconnect_getResource;            # API call for all Gateways
 sub vitoconnect_getResourceCallback;    # Get all API readings
 sub vitoconnect_getPowerLast;           # Write the power reading of the full last day to the DB
@@ -69,239 +68,8 @@ sub vitoconnect_action;                 #
 
 sub vitoconnect_StoreKeyValue;          # Werte verschlüsselt speichern
 sub vitoconnect_ReadKeyValue;           # verschlüsselte Werte auslesen
+sub DeleteKeyValue;                     # verschlüsselte Werte löschen
 
-##############################################################################
-#   Changelog:
-#               Changed to %vNotesIntern. See %vNotesIntern below.
-#   2024-12-12  In case of more than one Gateway only allow Set_New if serial is provided
-#               Get Object and Hash in Array readings. E.g. device.messages.errors.raw
-#               In case of expired token (every hour) do not do uncessary gateway calls, just get the new token.
-#               This will safe API calls and reduce the API overhead.
-#   2024-12-06  Remove internal timer when Device gets defined or redefined
-#   2024-12-05  Error fixed remove logReponseOnce Flag after one run
-#   2024-12-04  Fixed getResource to read gw in first try, this will fix the unnecessary API calls if you do not specify a Gateway Serial
-#               Fixed timers if more than one Gateway
-#   2024-12-03  Fixed Gateway Serial handling.
-#   2024-12-02  Day power readings werden nun unter .asSingleValue gespeichert.
-#               Die Daten kommen von der API nur sporatisch, erst nach mehreren Tagen.
-#               Diese Funktion trägt sie nach und man kann so Graphen malen.
-#   2024-12-01  Statisches Mapping von SVN übernommen.
-#               Bug bei Fehlerbehandlung von vitoconnect_action behoben
-#               Parmeter vitoconnect_mapping_roger um Rogers mapping zu benutzen
-#               RequestLists aufgespalten nach SVN und Roger
-#               neue sub vitoconnect_Set_Roger
-#   2024-11-30  HK1_Betriebsart:active,standby  + heating,dhw,dhwAndHeating,forcedReduced,forcedNormal
-#               Mehr Readings siehe https://forum.fhem.de/index.php?msg=1326591
-#               If setter is called with ok, also set the value in the reading
-#   2024-11-16  Änderungen für Hybrid Anlagen mit 2 Gateways und eigenem Mapping der Werte.
-#               Mehrere Gateways werden abgefragt.
-#               Die Readings oder gedumpen Files haben als Suffix die Gateway Serial.
-#               Es kann über das neue Attribut vitoconnect_serial eine Gateway Serial festgelegt werden die fortan allein abgerufen werden soll.
-#               Somit ist es möglich für jeden Gateway ein vitoconnect Device anzulegen oder alle Readings in einem Device zu verwalten.
-#               Dadurch kann man z.B. ein Device Wärmepumpe und eines Brenner haben.
-#               Diese können dann unterschiedliche Abfrageintervalle haben.
-#               Z.b. WP die normalerweise arbeitet und alles Steuert alle 100 Sek und den Brenner nur all 300 Sek.
-#               Ein eignes Mapping der Werte kann im Attribut mapping erstellt werden.
-#               Das Format ist { 'Key1' => 'Value1', 'Key2' => 'Value2' }
-#               Wenn angegeben ersetzt dieses Mapping das statische Standard mapping.
-#               Eine eigene translation kann angegeben werden um jedes einzelne Wort zu übersetzen.
-#               Das Format ist { 'Key1' => 'Value1', 'Key2' => 'Value2' }
-#               Translation hat vorrang for mapping hat vorrang vor statischem mapping im modul
-#               Code fixes in Bezug auf subs und Komentare
-#               Error Handling überarbeitet
-#               Initialisierung von installationFeatures aufgetrennt, alle subs sind nun nonBlocking
-#               Attribut model entfernt, wird nicht verwendet
-#               vitoconnect_gw_readings implementiert, wenn 1 werden die internen readings in readings gespeichert wenn 0 nicht
-#               vitoconnect_actions_active implementiert, Setter im JSON werden als reading.setURI gespeichert
-#               Set für RAW readings implementiert, so dynamisch wie möglich, VIESSMANN API ist nicht eindeutig und Reihenfolge im JSON ist wichtig, das ist großer murks
-#               Beschreibungen für Attribute im WEBUI nun auch anzeigen und angepasst
-#               Achtung! Keine Umlaute in Heizkreisnamen verwenden!
-#               stefanru
-#   2023-11-04  set-Befehle an Viessmann-Api angepasst
-#               Heizung:    set <name> HK1_Betriebsart standby,heating
-#                           set <name> HK1_Soll_Temp_normal nn      ## 3-37,1
-#               Warmwasser: set <name> WW_Betriebsart  off,balanced
-#               diverse Namen von readings angepasst
-#
-#   2018-11-24  initial version
-#   2018-12-11  non-blocking
-#               Reading "status" in "state" umbenannt
-#   2018-12-23  Neue Werte in der API werden unter ihrem JSON Name als Reading eingetragen
-#               Neue Readings:
-#                   heating.boiler.sensors.temperature.commonSupply.status error
-#                   heating.boiler.temperature.value                          48.1
-#                   heating.burner.modulation.value                        11
-#                   heating.burner.statistics.hours                        933.336666666667
-#                   heating.burner.statistics.starts                       2717
-#                   heating.circuits.0.circulation.pump.status             on
-#                   heating.dhw.charging.active                            0
-#                   heating.dhw.pumps.circulation.schedule.active          1
-#                   heating.dhw.pumps.circulation.schedule.entries         sun mode:on end:22:30 start:04:30 position:0, fri end:22:30 mode:on position:0 start:04:30,
-#                                                                          mon mode:on end:22:30 start:04:30 position:0,
-#                                                                          wed start:04:30 position:0 end:22:30 mode:on, thu mode:on end:22:30 position:0 start:04:30, sat end:22:30 mode:on position:0 start:04:30,
-#                                                                          tue position:0 start:04:30 end:22:30 mode:on,
-#                   heating.dhw.pumps.circulation.status                   on
-#                   heating.dhw.pumps.primary.status                       off
-#                   heating.dhw.sensors.temperature.outlet.status          error
-#                   heating.dhw.temperature.main.value                     53
-#   2018-12-30     initial offical release
-#                 remove special characters from readings
-#                 some internal improvements suggested by CoolTux
-#   2019-01-01     "disabled" implemented
-#                 "set update implemented
-#                       renamed "WW-onTimeCharge_aktiv" into "WW-einmaliges_Aufladen_aktiv"
-#                       Attribute vitoconnect_raw_readings:0,1 " and  ."vitoconnect_actions_active:0,1 " implemented
-#                       "set clearReadings" implemented
-#   2019-01-05      Passwort wird im KeyValue gespeichert statt im Klartext
-#                 Action "oneTimeCharge" implemented
-#   2019-01-14      installation, code and gw in den Internals unsichtbar gemacht
-#                 Reading "counter" entfernt (ist weiterhin in Internals sichtbar)
-#                       Reading WW-einmaliges_Aufladen_active umbenannt in WW-einmaliges_Aufladen
-#                 Befehle zum setzen von
-#                       HK1-Betriebsart
-#                       HK2-Betriebsart
-#                       HK1-Solltemperatur_normal
-#                       HK2-Solltemperatur_normal
-#                       HK1-Solltemperatur_reduziert
-#                       HK2-Solltemperatur_reduziert
-#                       WW-einmaliges_Aufladen
-#                 Bedienfehler (z.B. Ausführung einer Befehls für HK2, wenn die Hezung nur einen Heizkreis hat)
-#                       führen zu einem "Bad Gateway" Fehlermeldung in Logfile
-#                       Achtung: Keine Prüfung ob Befehle sinnvoll und oder erlaubt sind! Nutzung auf eigene Gefahr!
-#   2019-01-15     Fehler bei der Befehlsausführung gefixt
-#   2019-01-22      Klartext für Readings für HK3 und heating.dhw.charging.level.* hinzugefügt
-#                       set's für HK2 implementiert
-#                      set für Slope und Shift implementiert
-#                       set WW-Haupttemperatur und WW-Solltemperatur implementiert
-#                       set HK1-Solltemperatur_comfort_aktiv HK1-Solltemperatur_comfort implementiert
-#                       set  HK1-Solltemperatur_eco implementiert (set HK1-Solltemperatur_eco_aktiv scheint es nicht zu geben?!)
-#                       vor einem set vitoconnect update den alten Timer löschen
-#                       set vitoconnect logResponseOnce implementiert (eventuell werden zusätzliche perl Pakete benötigt?)
-#   2019-01-26      Fehler, dass HK3 Readings auf HK2 gemappt wurden gefixt
-#   2019-02-17      Readings für den Stromverbrauch (heating.power.consumption.*) und
-#                         Raumtemperatur (heating.circuits.?.sensors.temperature.room.value) ergänzt
-#                       set-Befehle für HKs werden nur noch angezeigt, wenn der HK auch aktiv ist
-#                       Wiki aktualisiert
-#   2019-02-27      stacktrace-Fehler (hoffentlich) behoben
-#                       Betriebsarten "heating" und "active" ergänzt
-#   2019-03-02      Readings für heating.boiler.sensors.temperature.commonSupply.value und
-#                           heating.circuits.1.operating.modes.heating.active hinzugefügt
-#                       Typo fixed ("Brenner_Be-t-riebsstunden")
-#   2019-03-29      neue Readings:
-#                           heating.circuits.1.operating.modes.dhwAndHeatingCooling.active 1
-#                           heating.circuits.1.operating.modes.normalStandby.active 0
-#                           heating.circuits.1.operating.programs.fixed.active 0
-#                           heating.compressor.active 0
-#                           heating.dhw.temperature.hysteresis.value 5
-#                           heating.dhw.temperature.temp2.value 60
-#                       Passwort wird bei "define" nur noch gesetzt, wenn noch kein Passwort gespeichert war
-#                 Attribut "model" implementiert
-#   2019-04-26      neue Readings für
-#                       heating.gas.consumption.dhw.unit kilowattHour
-#                       heating.gas.consumption.heating.unit kilowattHour
-#                       heating.power.consumption.unit kilowattHour
-#                       Typo in WW-Zirkulationspumpe_Zeitsteuerung_aktiv fixt
-# 2019-06-01        neue Readings für
-#                       heating.solar.power.production.day  3.984,3.797,5.8,5.5,6.771,5.77,5.441,9.477
-#                       heating.solar.power.production.month
-#                       heating.solar.power.production.unit kilowattHour
-#                       heating.solar.power.production.week
-#                       heating.solar.power.production.year
-#                     heating.circuits.X.name (wird im Moment noch nicht von der API gefüllt!)
-#                 Format der "Schedule" Readings in JSON geändert
-#                       das Format von HKx-Urlaub_Start und _Ende ist jetzt YYYY-MM-TT.
-#                   Wenn noch kein Urlaub aktiviert wurde, wird bei
-#                    HKx-Urlaub_Start das Datum für _Ende auf den Folgetag gesetzt
-#                    Dafür werden die Perl Module DateTime, Time:Piece und Time::Seconds
-#                    benötigt (installieren mit apt install libdatetime-perl!)
-#
-# 2019-08-11        Dokumentation aktualisiert
-#                       Das Reading 'stat' zeigt jetzt den "aggregatedStatus" an, der von der API geliefert wird
-#                                   Bsp: "Offline", "WorksProperly"
-#                 Readings werden nur noch aktualisiert (und ein entsprechendes Event erzeugt),
-#                          wenn sich ihr Wert geändert hat. "state" wird immer aktualisiert.
-#                       Reading für Solarunterstützung hinzugefügt:
-#                          "heating.solar.active"                                           => "Solar_aktiv",
-#                          "heating.solar.pumps.circuit.status"                         => "Solar_Pumpe_Status",
-#                          "heating.solar.rechargeSuppression.status"               => "Solar_Aufladeunterdrueckung_Status",
-#                          "heating.solar.sensors.power.status"                         => "Solar_Sensor_Power_Status",
-#                          "heating.solar.sensors.power.value"                      => "Solar_Sensor_Power",
-#                          "heating.solar.sensors.temperature.collector.status"     => "Solar_Sensor_Temperatur_Kollektor_Status",
-#                          "heating.solar.sensors.temperature.collector.value"  => "Solar_Sensor_Temperatur_Kollektor",
-#                          "heating.solar.sensors.temperature.dhw.status"           => "Solar_Sensor_Temperatur_WW_Status",
-#                          "heating.solar.sensors.temperature.dhw.value"            => "Solar_Sensor_Temperatur_WW",
-#                          "heating.solar.statistics.hours"                            => "Solar_Sensor_Statistik_Stunden"
-#                       ErrorListChanges (Fehlereintraege_Historie und Fehlereintraege_aktive) werden jetzt im JSON
-#                          JSON Format ausgegeben (z.B.: "{"new":[],"current":[],"gone":[]}")
-#
-# 2019-09-07        Readings werden wieder erzeugt auch wenn sich der Wert nicht ändert
-#
-# 2019-11-23        Readings für "heating.power.consumption.total.*" hinzugefügt. Scheint identisch mit "heating.power.consumption.*"
-#                   Behoben: Readings wurden nicht mehr aktualisiert, wenn in getResourceCallback die Resource nicht als JSON interpretiert werden konnte (Forum: #390)
-#                   Behoben: vitoconnect bringt FHEM zum Absturz in Zeile 1376 (Forum: #391)
-#                   Überwachung der Aktualität: Zeitpunkt des letzten Updates wird in State angezeigt (Forum #397)
-#
-# 2019-12-25        heating.solar.power.cumulativeProduced.value, heating.circuits.X.geofencing.active, heating.circuits.X.geofencing.status hinzugefügt
-#                   Behoben: Readings wurden nicht mehr aktualisiert, wenn Resource an weiteren Stellen nicht als JSON interpretiert werden konnte(Forum: #390)
-#
-# 2020-03-02      Bei Aktionen wird nicht mehr auf defined($data) sondern auf ne "" getestet.
-# 2020-04-05      s.o. 2. Versuch
-#
-# 2020-04-09      my $dir = path(AttrVal("global","logdir","log"));
-#
-# 2020-04-17      "Viessmann" Tippfehler gefixt
-#                 Prototypen und "undef"s entfernt
-#
-# 2020-04-22      Reading heating.boiler.temperature.unit heating.operating.programs.holiday.active
-#                            heating.operating.programs.holiday.end heating.operating.programs.holiday.start
-#                 set Befehle hinzugefügt: Urlaub_Start, Urlaub_Ende, Urlaub_unschedule
-#                            HKx-Name, HKx-Zeitsteuerung_Heizung, WW-Zeitplan, WW-Zirkulationspumpe_Zeitplan
-#
-# 2020-04-23      Refactoring (kein Einloggen mehr beim Ausführen einer Aktion)
-# 2020-05-20      Neue Readings:
-#                   heating.boiler.sensors.temperature.main.unit celsius
-#                   heating.circuits.0.sensors.temperature.supply.unit celsius
-#                   heating.dhw.sensors.temperature.hotWaterStorage.unit celsius
-#                   heating.dhw.sensors.temperature.outlet.unit celsius
-#                   heating.sensors.temperature.outside.unit celsius
-#                 Fehlerbehandlung verbessert
-#                 nur noch einloggen, wenn nötig (Token läuft nach 1h aus.)
-#
-# 2020-06-25      Fehlerbehandlung für API (statusCode 401 (UNAUTHORIZED), 404 (DEVICE_NOT_FOUND)
-#                    und 429 (RATE_LIMIT_EXCEEDED) und 502 (DEVICE_COMMUNICATION_ERROR)
-#                 Neue Readings für Vitodens 200-W B2HF-19 und Brennstoffzelle von Viessmann (PA2)
-#                 Information aus dem GW auslesen (Attribut "vitoconnect_gw_readings" auf "1" setzen;
-#                    noch unvollständig!)
-#
-# 2020-07-06      readings for heating.power.production.demandCoverage.* fixed
-#                 bei logResponseOnce wird bei getCode angefangen damit auch gw.json neu erzeugt wird
-#
-# 2020-11-26      Bugfix für einige "set"-Kommandos für HK2 und HK3
-#
-# 2020-12-21      Neue Readings "heating.power.production.current.status" => "Stromproduktion_aktueller_Status",
-#                   "heating.power.production.current.value" => "Stromproduktion",
-#                   "heating.sensors.power.output.status" => "Sensor_Stromproduktion_Status",
-#                   "heating.sensors.power.output.value" => "Sensor_Stromproduktion" und
-#                   "heating.circuits.X.operating.programs.Y.demand" =>
-#                     "HK(X+1)-Solltemperatur_Y_Anforderung" (X=0,1,2 und Y=normal,reduced,comfort)
-# 2021-02-21      Umstieg auf Endpoint v2 zur Authorization
-#                 *experimentell* Attribut vitoconnect_device
-#                 Workaround für Forum #561
-#                 Neue Readings für "*ValueReadAt"
-#
-#   2021-07-19  Anpassungen für privaten apiKey. Redirect URIs muss "http://localhost:4200/" sein.
-#               Nutzung des refresh_token
-#
-#   2021-07-19  neue Readings für heating.burners.0.*
-#
-#   ToDo:         timeout, intervall konfigurierbar machen
-#                 Attribute implementieren und dokumentieren
-#                 Mehrsprachigkeit
-#                 Auswerten der Readings in getCode usw.
-#                 devices/0 ? Was, wenn es mehrere Devices gibt?
-#                 nach einem set Befehl Readings aktualisieren, vorher alten Timer löschen
-#                 heating.circuits.0.operating.programs.holiday.changeEndDate action: end implementieren?
-#
 
 package main;
 use strict;
@@ -323,6 +91,9 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.6.0"  => "23.01.2025  Total rebuild of initialization and gw handling. In case of more than one installation or gw you have to set it via".
+                          "selectDevice in the set of the device. The attributes vitoconnect_serial and vitoconnect_installationID will be populated".
+                          "handling of getting installation and serial changed. StoredValues are now deleted. Other fixes and developments",
   "0.5.0"  => "02.01.2025  Added attribute installationID, in case you use two installations, see https://forum.fhem.de/index.php?msg=1329165",
   "0.4.2"  => "31.12.2024  Small fix for Vitoladens 300C, heating.circuits.0.operating.programs.comfort",
   "0.4.1"  => "30.12.2024  Bug fixes, fixed Releasenotes, changed debugging texts and messages in Set_New",
@@ -349,8 +120,6 @@ my $iotURL_V2     = "https://api.viessmann.com/iot/v2/features/";
 
 my $RequestListMapping; # Über das Attribut Mapping definierte Readings zum überschreiben der RequestList
 my %translations;       # Über das Attribut translations definierte Readings zum überschreiben der RequestList
-#my $Response;           # Gespeicherts JSON um dynamische Setter zu erstellen
-
 
 
 # Feste Readings, orignal Verhalten des Moduls, können über RequestListMapping oder translations überschrieben werden.
@@ -1465,6 +1234,7 @@ my $RequestListRoger = {
     "heating.solar.power.production.year"  => "Solarproduktion/Jahr"
 };
 
+
 #####################################################################################################################
 # Modul initialisieren und Namen zusätzlicher Funktionen bekannt geben
 #####################################################################################################################
@@ -1472,6 +1242,7 @@ sub vitoconnect_Initialize {
     my ($hash) = @_;
     $hash->{DefFn}   = \&vitoconnect_Define;    # wird beim 'define' eines Gerätes aufgerufen
     $hash->{UndefFn} = \&vitoconnect_Undef;     # # wird beim Löschen einer Geräteinstanz aufgerufen
+    $hash->{DeleteFn} = \&DeleteKeyValue;
     $hash->{SetFn}   = \&vitoconnect_Set;       # set-Befehle
     $hash->{GetFn}   = \&vitoconnect_Get;       # get-Befehle
     $hash->{AttrFn}  = \&vitoconnect_Attr;      # Attribute setzen/ändern/löschen
@@ -1481,17 +1252,6 @@ sub vitoconnect_Initialize {
       . "vitoconnect_mappings:textField-long "
       . "vitoconnect_translations:textField-long "
       . "vitoconnect_mapping_roger:0,1 "
-# Wird nicht verwendet
-#      . "model:Vitodens_200-W_(B2HB),Vitodens_200-W_(B2KB),"
-#      . "Vitotronic_200_(HO1),Vitotronic_200_(HO1A),Vitotronic_200_(HO1B),Vitotronic_200_(HO1D),"
-#      . "Vitotronic_200_(HO2B),"
-#      . "Vitotronic_200_RF_(HO1C),Vitotronic_200_RF_(HO1E),"
-#      . "Vitotronic_200_(KO1B),Vitotronic_200_(KO2B),Vitotronic_200_(KW6),Vitotronic_200_(KW6A),"
-#      . "Vitotronic_200_(KW6B),Vitotronic_200_(KW1),Vitotronic_200_(KW2),Vitotronic_200_(KW4),"
-#      . "Vitotronic_200_(KW5),"
-#      . "Vitotronic_300_(KW3),Vitotronic_200_(WO1A),Vitotronic_200_(WO1B),Vitotronic_200_(WO1C),"
-#      . "Vitoligno_300-C,Vitoligno_200-S,Vitoligno_300-P_mit_Vitotronic_200_(FO1),Vitoligno_250-S,"
-#      . "Vitoligno_300-S "
       . "vitoconnect_raw_readings:0,1 "                 # Liefert nur die raw readings und verhindert das mappen wenn gesetzt
       . "vitoconnect_disable_raw_readings:0,1 "         # Wird ein mapping verwendet können die weiteren RAW Readings ausgeblendet werden
       . "vitoconnect_gw_readings:0,1 "                  # Schreibt die GW readings als Reading ins Device
@@ -1505,6 +1265,7 @@ sub vitoconnect_Initialize {
       eval { FHEM::Meta::InitMod( __FILE__, $hash ) };     ## no critic 'eval'
     return;
 }
+
 
 #####################################################################################################################
 # wird beim 'define' eines Gerätes aufgerufen
@@ -1541,9 +1302,7 @@ sub vitoconnect_Define {
     $hash->{counter}         = 0;
     $hash->{timeout}         = 15;
     $hash->{".access_token"} = "";
-    $hash->{".installation"} = "";
-    $hash->{".gw"}           = "";
-    $hash->{".gwa"}           = ();
+    $hash->{devices}         = []; 
     $hash->{"Redirect_URI"}  = $callback_uri;
 
     my $isiwebpasswd = vitoconnect_ReadKeyValue($hash,"passwd");    # verschlüsseltes Kennwort auslesen
@@ -1560,6 +1319,7 @@ sub vitoconnect_Define {
     return;
 }
 
+
 #####################################################################################################################
 # wird beim Löschen einer Geräteinstanz aufgerufen
 #####################################################################################################################
@@ -1568,6 +1328,7 @@ sub vitoconnect_Undef {
     RemoveInternalTimer($hash); # Timer löschen
     return;
 }
+
 
 #####################################################################################################################
 # bisher kein 'get' implementiert
@@ -1578,46 +1339,110 @@ sub vitoconnect_Get {
     return;
 }
 
+
 #####################################################################################################################
 # Implementierung set-Befehle
 #####################################################################################################################
+sub vitoconnect_Set {
+    my ($hash,$name,$opt,@args ) = @_;  # Übergabe-Parameter
+    
+    # Standard Parameter setzen
+    my $val = "unknown value $opt, choose one of update:noArg clearReadings:noArg password apiKey logResponseOnce:noArg ";
+    Log(5,$name.", -vitoconnect_Set started: ". $opt); #debug
+    
+    # Setter für die Geräteauswahl dynamisch erstellen  
+    Log3($name,4,$name." - Set devices: ".$hash->{devices});
+    if (defined $hash->{devices} && ref($hash->{devices}) eq 'HASH' && keys %{$hash->{devices}} > 0) {
+        my @device_serials = keys %{$hash->{devices}};
+        $val .= " selectDevice:" . join(",", @device_serials);
+    } else {
+        $val .= " selectDevice:noArg"
+    }
+    $val .= " ";
+    Log3($name,5,$name." - Set val: $val, Set Opt: $opt");
+    
+    # Hier richtig?
+    return "set ".$name." needs at least one argument" unless (defined($opt) );
+    
+    # Setter für Device Werte rufen
+    if  (AttrVal( $name, 'vitoconnect_raw_readings', 0 ) eq "1" ) {
+        #use new dynamic parsing of JSON to get raw setters
+        $val .= vitoconnect_Set_New ($hash,$name,$opt,@args);
+    } 
+    elsif  (AttrVal( $name, 'vitoconnect_mapping_roger', 0 ) eq "1" ) {
+        #use roger setters
+        $val .= vitoconnect_Set_Roger ($hash,$name,$opt,@args);
+    } 
+    else {
+        #use svn setters
+    $val .= vitoconnect_Set_SVN ($hash,$name,$opt,@args);
+    }
+    
+
+
+    if  ($opt eq "update")                            {   # set <name> update: update readings immeadiatlely
+        RemoveInternalTimer($hash);                         # bisherigen Timer löschen
+        vitoconnect_GetUpdate($hash);                       # neue Abfrage starten
+        return;
+    }
+    elsif ($opt eq "logResponseOnce" )                  {   # set <name> logResponseOnce: dumps the json response of Viessmann server to entities.json, gw.json, actions.json in FHEM log directory
+        $hash->{".logResponseOnce"} = 1;                    # in 'Internals' merken
+        RemoveInternalTimer($hash);                         # bisherigen Timer löschen
+        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
+        return;
+    }
+    elsif ($opt eq "clearReadings" )                    {   # set <name> clearReadings: clear all readings immeadiatlely
+        AnalyzeCommand($hash,"deletereading ".$name." .*");
+        return;
+    }
+    elsif ($opt eq "password" )                         {   # set <name> password: store password in key store
+        my $err = vitoconnect_StoreKeyValue($hash,"passwd",$args[0]);   # Kennwort verschlüsselt speichern
+        return $err if ($err);
+        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
+        return;
+    }
+    elsif ($opt eq "apiKey" )                           {   # set <name> apiKey: bisher keine Beschreibung
+        $hash->{apiKey} = $args[0];
+        my $err = vitoconnect_StoreKeyValue($hash,"apiKey",$args[0]);   # apiKey verschlüsselt speichern
+        RemoveInternalTimer($hash);
+        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
+        return;
+    }
+    elsif ($opt eq "selectDevice" )                           {   # set <name> selectDevice: Bei mehreren Devices eines auswählen
+        Log3($name,4,$name." - Set selectedDevice serial: ".$args[0]);
+        if (defined $args[0] && $args[0] ne '') {
+        my $serial = $args[0];
+        my %devices = %{ $hash->{devices} };
+        if (exists $devices{$serial}) {
+          my $installationId = $devices{$serial}{installationId};
+          Log3($name,5,$name." - Set selectedDevice: instID: $installationId, serial $serial");
+          CommandAttr (undef, "$name vitoconnect_installationID $installationId");
+          CommandAttr (undef, "$name vitoconnect_serial $serial");
+        }
+        $hash->{selectedDevice} = $serial;
+        RemoveInternalTimer($hash);                         # bisherigen Timer löschen
+        vitoconnect_GetUpdate($hash);                       # neue Abfrage starten
+        } else {
+        readingsSingleUpdate($hash,"state","Kein Gateway/Device gefunden, bitte Setup überprüfen",1);  
+        }
+        return;
+    }
+
+
+return $val;
+}
+
+
+#####################################################################################################################
+# Implementierung set-Befehle neue logik aus raw readings
+#####################################################################################################################
 sub vitoconnect_Set_New {
     my ($hash, $name, $opt, @args) = @_;
-    my $gwatemp      = $hash->{".gwa"};
-    my $gw           = $hash->{".gw"};
+    my $gw = AttrVal( $name, 'vitoconnect_serial', 0 );
+    my $val;
     
-    my $val = "unknown value $opt, choose one of update:noArg clearReadings:noArg password apiKey logResponseOnce:noArg ";
-    Log(5,$name.", -vitoconnect_Set_New started: ". $opt); #debug
-    
-	my $string = "";
-    my @gwa = ();
-    if (defined($gwatemp) && $gwatemp ne "") {
-      $string = join(", ", @{$gwatemp});
-      Log(5,$name.", -vitoconnect_Set_New gwatemp: ". $string); #debug
-      @gwa = @{$gwatemp};
-    }
-    if (defined($gw) && $gw ne "") {
-        Log(5,$name.", - vitoconnect_Set_New Resource gw found reduce gwa: ".$gw); #debug
-        @gwa = $gw;
-    }
-    
-    my $gwaCount = scalar @gwa;
-    Log(5,$name.", - vitoconnect_Set_New Resource gwaCount: ".$gwaCount); #debug
-    $string = join(", ", @gwa);
-    Log(5,$name.", - vitoconnect_Set_New Resource gwa: ".$string); #debug
-    if ($gwaCount == 0) {
-        #readingsSingleUpdate($hash,"Aktion_Status","Warnung: Gateway noch nicht eingelesen. Entweder bis zum ersten Update warten oder mit logResponseOnce einlesen",1);    # Reading 'Aktion_Status' setzen
-        return $val;
-    } elsif ($gwaCount > 1) {
-        readingsSingleUpdate($hash,"Aktion_Status","Fehler: Mehr als ein Gateway. Für Setter bitte eine Serial in vitoconnect_serial vorgeben.",1); # Reading 'Aktion_Status' setzen
-    } else {
-       if (defined($hash->{"Aktion_Status"}) && $hash->{"Aktion_Status"} =~ /^OK:/) {
-        readingsSingleUpdate($hash,"Aktion_Status","OK:ready",1);  # Reading 'Aktion_Status' setzen
-       }
-    }
-    
-    my $Response = $hash->{".response_$gwa[0]"};
-    if ($gwaCount == 1 && $Response) {  # Überprüfen, ob $Response Daten enthält
+    my $Response = $hash->{".response_$gw"};
+    if ($Response) {  # Überprüfen, ob $Response Daten enthält
         my $data;
         eval { $data = decode_json($Response); };
         if ($@) {
@@ -1799,88 +1624,23 @@ sub vitoconnect_Set_New {
         }
     }
 
-    # Zusätzliche Optionen
-    if ($opt eq "update") {
-        RemoveInternalTimer($hash);
-        vitoconnect_GetUpdate($hash);
-        return;
-    } elsif ($opt eq "logResponseOnce") {
-        $hash->{".logResponseOnce"} = 1;
-        RemoveInternalTimer($hash);
-        vitoconnect_getCode($hash);
-        return;
-    } elsif ($opt eq "clearReadings") {
-        AnalyzeCommand($hash, "deletereading $name .*");
-        return;
-    } elsif ($opt eq "password") {
-        my $err = vitoconnect_StoreKeyValue($hash, "passwd", $args[0]);
-        return $err if ($err);
-        vitoconnect_getCode($hash);
-        return;
-    } elsif ($opt eq "apiKey") {
-        $hash->{apiKey} = $args[0];
-        my $err = vitoconnect_StoreKeyValue($hash, "apiKey", $args[0]);
-        RemoveInternalTimer($hash);
-        vitoconnect_getCode($hash);
-        return;
-    }
     
     # Rückgabe der dynamisch erstellten $val Variable
     Log(5,$name.", -vitoconnect_Set_New val: ". $val);
     Log(5,$name.", -vitoconnect_Set_New ended ");
     
-    #vitoconnect_check_gwa_and_get_gw($hash,$name);
-    
     return $val;
 }
 
 
-sub vitoconnect_Set {
+#####################################################################################################################
+# Implementierung set-Befehle alte logik fixes mapping letzte SVN Version
+#####################################################################################################################
+sub vitoconnect_Set_SVN {
     my ($hash,$name,$opt,@args ) = @_;  # Übergabe-Parameter
-    
-    if  (AttrVal( $name, 'vitoconnect_raw_readings', 0 ) eq "1" ) {
-        #use new dynamic parsing of JSON to get raw setters
-        
-        return vitoconnect_Set_New ($hash,$name,$opt,@args);
-    }
-    
-    if  (AttrVal( $name, 'vitoconnect_mapping_roger', 0 ) eq "1" ) {
-        #use new dynamic parsing of JSON to get raw setters
-        return vitoconnect_Set_Roger ($hash,$name,$opt,@args);
-    }
-    
     # SVN mapping original handling of modul
-    return "set ".$name." needs at least one argument" unless (defined($opt) );
 
-    if    ($opt eq "update")                            {   # set <name> update: update readings immeadiatlely
-        RemoveInternalTimer($hash);                         # bisherigen Timer löschen
-        vitoconnect_GetUpdate($hash);                       # neue Abfrage starten
-        return;
-    }
-    elsif ($opt eq "logResponseOnce" )                  {   # set <name> logResponseOnce: dumps the json response of Viessmann server to entities.json, gw.json, actions.json in FHEM log directory
-        $hash->{".logResponseOnce"} = 1;                    # in 'Internals' merken
-        RemoveInternalTimer($hash);                         # bisherigen Timer löschen
-        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
-        return;
-    }
-    elsif ($opt eq "clearReadings" )                    {   # set <name> clearReadings: clear all readings immeadiatlely
-        AnalyzeCommand($hash,"deletereading ".$name." .*");
-        return;
-    }
-    elsif ($opt eq "password" )                         {   # set <name> password: store password in key store
-        my $err = vitoconnect_StoreKeyValue($hash,"passwd",$args[0]);   # Kennwort verschlüsselt speichern
-        return $err if ($err);
-        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
-        return;
-    }
-    elsif ($opt eq "apiKey" )                           {   # set <name> apiKey: bisher keine Beschreibung
-        $hash->{apiKey} = $args[0];
-        my $err = vitoconnect_StoreKeyValue($hash,"apiKey",$args[0]);   # apiKey verschlüsselt speichern
-        RemoveInternalTimer($hash);
-        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
-        return;
-    }
-    elsif ( $opt eq "HK1-Heizkurve-Niveau" ) {
+    if ( $opt eq "HK1-Heizkurve-Niveau" ) {
         my $slope = ReadingsVal( $name, "HK1-Heizkurve-Steigung", "" );
         vitoconnect_action(
             $hash,
@@ -2305,10 +2065,7 @@ sub vitoconnect_Set {
         return;
     }
 
-    my $val =
-        "unknown value $opt, choose one of update:noArg clearReadings:noArg "
-      . "password apiKey logResponseOnce:noArg "
-      . "WW-einmaliges_Aufladen:activate,deactivate "
+    my $val = "WW-einmaliges_Aufladen:activate,deactivate "
       . "WW-Zirkulationspumpe_Zeitplan:textField-long "
       . "WW-Zeitplan:textField-long "
       . "WW-Haupttemperatur:slider,10,1,60 "
@@ -2367,45 +2124,17 @@ sub vitoconnect_Set {
           . "HK3-Name ";
     }
     
-    #vitoconnect_check_gwa_and_get_gw($hash,$name);
-    
     return $val;
 }
 
 
+#####################################################################################################################
+# Implementierung set-Befehle alte logik fixes mapping von Roger letzte Version
+#####################################################################################################################
 sub vitoconnect_Set_Roger {
     my ($hash,$name,$opt,@args ) = @_;  # Übergabe-Parameter
-    return "set ".$name." needs at least one argument" unless (defined($opt) );
 
-    if    ($opt eq "update")                            {   # set <name> update: update readings immeadiatlely
-        RemoveInternalTimer($hash);                         # bisherigen Timer löschen
-        vitoconnect_GetUpdate($hash);                       # neue Abfrage starten
-        return;
-    }
-    elsif ($opt eq "logResponseOnce" )                  {   # set <name> logResponseOnce: dumps the json response of Viessmann server to entities.json, gw.json, actions.json in FHEM log directory
-        $hash->{".logResponseOnce"} = 1;                    # in 'Internals' merken
-        RemoveInternalTimer($hash);                         # bisherigen Timer löschen
-        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
-        return;
-    }
-    elsif ($opt eq "clearReadings" )                    {   # set <name> clearReadings: clear all readings immeadiatlely
-        AnalyzeCommand($hash,"deletereading ".$name." .*");
-        return;
-    }
-    elsif ($opt eq "password" )                         {   # set <name> password: store password in key store
-        my $err = vitoconnect_StoreKeyValue($hash,"passwd",$args[0]);   # Kennwort verschlüsselt speichern
-        return $err if ($err);
-        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
-        return;
-    }
-    elsif ($opt eq "apiKey" )                           {   # set <name> apiKey: bisher keine Beschreibung
-        $hash->{apiKey} = $args[0];
-        my $err = vitoconnect_StoreKeyValue($hash,"apiKey",$args[0]);   # apiKey verschlüsselt speichern
-        RemoveInternalTimer($hash);
-        vitoconnect_getCode($hash);                         # Werte für: Access-Token, Install-ID, Gateway anfragen
-        return;
-    }
-    elsif ($opt eq "HK1_Betriebsart" )                  {   # set <name> HKn_Betriebsart: sets HKn_Betriebsart to heating,standby
+    if ($opt eq "HK1_Betriebsart" )                  {   # set <name> HKn_Betriebsart: sets HKn_Betriebsart to heating,standby
         vitoconnect_action($hash,
             "heating.circuits.0.operating.modes.active/commands/setMode",
             "{\"mode\":\"$args[0]\"}",
@@ -2832,10 +2561,7 @@ sub vitoconnect_Set_Roger {
         return;
     }
 
-    my $val =
-         "unknown value $opt, choose one of update:noArg clearReadings:noArg "
-        ."password apiKey logResponseOnce:noArg "
-        ."WW_einmaliges_Aufladen:activate,deactivate "
+    my $val = "WW_einmaliges_Aufladen:activate,deactivate "
         ."WW_Zirkulationspumpe_Zeitplan:textField-long "
         ."WW_Zeitplan:textField-long "
 #       ."WW_Haupttemperatur:slider,10,1,60 "
@@ -2895,17 +2621,17 @@ sub vitoconnect_Set_Roger {
           . "HK3_Name ";
     }
     
-    #vitoconnect_check_gwa_and_get_gw($hash,$name);
-    
     return $val;
 }
+
 
 #####################################################################################################################
 # Attribute setzen/ändern/löschen
 #####################################################################################################################
 sub vitoconnect_Attr {
     my ($cmd,$name,$attr_name,$attr_value ) = @_;
-        #Log(5,$name.", ".$cmd ." vitoconnect_: ".$attr_name." value: ".$attr_value);
+    
+	Log(5,$name.", ".$cmd ." vitoconnect_: ".$attr_name." value: ".$attr_value);
     if ($cmd eq "set")  {
         if ($attr_name eq "vitoconnect_raw_readings" )      {
             if ($attr_value !~ /^0|1$/)                     {
@@ -2985,16 +2711,10 @@ sub vitoconnect_Attr {
     elsif ($cmd eq "del") {
         if ($attr_name eq "vitoconnect_mappings") {
             undef $RequestListMapping;
-    #       Log(1,$name.", undef $Requestlistmapping");
         }
         elsif ($attr_name eq "vitoconnect_translations") {
             undef %translations;
-    #       Log(1,$name.", undef translations");
         }
-    #   if ($attr_name eq "vitoconnect_serial") {
-    #     $hash->{".gw"} = "";
-    #     Log3($name,4,$name." - serial deleted");
-    #   }
     }
     return;
 }
@@ -3010,6 +2730,7 @@ sub vitoconnect_GetUpdate {
     if (IsDisabled($name))      {   # Device disabled
         Log3($name,4,$name." - device disabled");
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);   # nach Intervall erneut versuchen
+		return;
     }
     else                        {   # Device nicht disabled
         vitoconnect_getResource($hash);
@@ -3092,6 +2813,7 @@ sub vitoconnect_getCodeCallback {
         readingsSingleUpdate($hash,"state","Login failure. Check password and apiKey",1);   # Reading 'state' setzen
         Log3($name,1,$name." - Login failure. Check password and apiKey");
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);   # Forum: #880
+		return;
     }
     return;
 }
@@ -3148,7 +2870,6 @@ sub vitoconnect_getAccessTokenCallback {
         if ($access_token ne "")    {
             $hash->{".access_token"} = $access_token;                   # in Internals speichern
             $hash->{"refresh_token"} = $decode_json->{"refresh_token"}; # in Internals speichern
-#list   Heiz_ViessMann i:.access_token i:refresh_token
 
             Log3($name,4,$name." - Access Token: ".substr($access_token,0,20)."...");
             vitoconnect_getGw($hash);   # Abfrage Gateway-Serial
@@ -3157,11 +2878,13 @@ sub vitoconnect_getAccessTokenCallback {
             Log3($name,1,$name." - Access Token: nicht definiert");
             Log3($name,5,$name." - Received response: ".$response_body."\n");
             InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+			return;
         }
     }
     else                            {   # Fehler bei Antwort
         Log3($name,1,$name.",vitoconnect_getAccessTokenCallback - getAccessToken: An error occured: ".$err);
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+		return;
     }
     return;
 }
@@ -3171,7 +2894,7 @@ sub vitoconnect_getAccessTokenCallback {
 # neuen Access-Token anfragen
 #####################################################################################################################
 sub vitoconnect_getRefresh {
-    my ($hash,$gw,$last)    = @_;
+    my ($hash)    = @_;
     my $name      = $hash->{NAME};
     my $client_id = $hash->{apiKey};
     my $param     = {
@@ -3185,8 +2908,6 @@ sub vitoconnect_getRefresh {
         sslargs  => { SSL_verify_mode => 0 },
         method   => "POST",
         timeout  => $hash->{timeout},
-        gw       => $gw,
-        last     => $last,
         callback => \&vitoconnect_getRefreshCallback
     };
 
@@ -3203,8 +2924,6 @@ sub vitoconnect_getRefreshCallback {
     my ($param,$err,$response_body) = @_;   # Übergabe-Parameter
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
-    my $gw     = $param->{gw};
-    my $last   = $param->{last};
 
     if ($err eq "")                 {
         Log3($name,4,$name.". - getRefreshCallback went ok");
@@ -3212,9 +2931,7 @@ sub vitoconnect_getRefreshCallback {
         my $decode_json = eval {decode_json($response_body)};
         if ($@)                     {   # Fehler aufgetreten
             Log3($name,1,$name.", vitoconnect_getRefreshCallback: JSON error while request: ".$@);
-            if ($last == 1 ) {
             InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-            }
             return;
         }
         my $access_token = $decode_json->{"access_token"};
@@ -3223,22 +2940,19 @@ sub vitoconnect_getRefreshCallback {
             Log3($name,4,$name." - Access Token: ".substr($access_token,0,20)."...");
             #vitoconnect_getGw($hash);  # Abfrage Gateway-Serial
             # directly call get resource to save API calls
-            vitoconnect_getResource_per_gw($hash,$gw,$last);
+            vitoconnect_getResource($hash);
         }
         else {
             Log3 $name, 1, "$name - Access Token: nicht definiert";
             Log3 $name, 5, "$name - Received response: $response_body\n";
-            if ($last == 1 ) {
             InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);    # zurück zu getCode?
             return;
-            }
         }
     }
     else {
         Log3 $name, 1, "$name - getRefresh: An error occured: $err";
-        if ($last == 1 ) {
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-        }
+		return;
     }
     return;
 }
@@ -3274,8 +2988,6 @@ sub vitoconnect_getGwCallback {
     my ($param,$err,$response_body) = @_;   # Übergabe-Parameter
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
-    my $singleSerial = "";
-    
 
     if ($err eq "")                         {   # kein Fehler aufgetreten
         Log3($name,4,$name." - getGwCallback went ok");
@@ -3300,43 +3012,65 @@ sub vitoconnect_getGwCallback {
             Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
             }
             
-            # Alle Gateways holen
-            my @gwa=();
-            foreach ( @{ $items->{data} } ) {
-             my $gw    = $_;
-             my $serial = $gw->{serial};
-             if ( defined($serial) ) {
-                 Log(5,$name.", - getGwCallback serial found, push to gwa: ".$serial);
-                 push(@gwa, $serial);
-                 if ( defined(AttrVal( $name, 'vitoconnect_serial', 0 )) && AttrVal( $name, 'vitoconnect_serial', 0 ) == $serial) {
-                      $singleSerial = $serial;
-                 } 
-                 #else {
-                #   $hash->{".gw"} = "";
-                 #}
-             }
-            }
-            $hash->{".gwa"} = [@gwa];
-            my $string = join(", ", @gwa);
-            Log(5,$name.", - getGwCallback gwa set to hash: ".$string);
+            # Alle Gateways holen und in hash schreiben, immer machen falls neue Geräte hinzu kommen
+            my %devices;
             
-            Log(5,$name.",  - getGwCallback vitoconnect_serial: ".AttrVal( $name, 'vitoconnect_serial', 0 ));
-            if ($singleSerial eq "") {
-                $hash->{".gw"} = "";
-                Log(5,$name.", - getGwCallback No singleSerial will use gwa");
-            } 
-            else {
-            Log(5,$name.", - getGwCallback Gw Serial matches given attribute serial, will take this serial for queries: ".$singleSerial);
-            $hash->{".gw"} = $singleSerial;
+            # Über jedes Gateway-Element in der JSON-Datenstruktur iterieren
+            foreach my $gateway (@{$items->{data}}) {
+              if (defined $gateway->{serial} && defined $gateway->{installationId}) {
+                $devices{$gateway->{serial}} = {
+                     installationId => $gateway->{installationId},
+                     gatewayType    => $gateway->{gatewayType},
+                     version        => $gateway->{version}
+                   };
+              }
+            }
+
+            $hash->{devices} = { %devices };
+            
+            if ( defined(AttrVal( $name, 'vitoconnect_installationID', 0 )) 
+                      && AttrVal( $name, 'vitoconnect_installationID', 0 ) ne "" 
+                      && AttrVal( $name, 'vitoconnect_installationID', 0 ) != 0 
+              && defined(AttrVal( $name, 'vitoconnect_serial', 0 )) 
+                      && AttrVal( $name, 'vitoconnect_serial', 0 ) ne "" 
+                      && AttrVal( $name, 'vitoconnect_serial', 0 ) != 0 )  {
+              # Attribute sind gesetzt, nichts zu tun
+              Log3($name,5,$name." - getGW all atributes set already attr: instID: ".AttrVal( $name, 'vitoconnect_installationID', 0 ).
+			                                                            ", serial: ".AttrVal( $name, 'vitoconnect_serial', 0 ));
+              } else 
+              {
+              # Prüfungen der Gateways und weiteres vorgehen 
+              my $num_devices = scalar keys %devices;
+            
+              if ($num_devices == 0) {
+                readingsSingleUpdate($hash,"state","Keine Gateways/Devices gefunden, Account prüfen",1);
+                return;
+              } elsif ($num_devices == 1) {
+                readingsSingleUpdate($hash,"state","Genau ein Gateway/Device gefunden",1);
+            
+               my ($serial) = keys %devices;
+               my $installationId = $devices{$serial}->{installationId};
+               Log3($name,4,$name." - getGW exactly one Device found set attr: instID: $installationId, serial $serial");
+               CommandAttr (undef, "$name vitoconnect_installationID $installationId");
+               CommandAttr (undef, "$name vitoconnect_serial $serial");
+              } else {
+                readingsSingleUpdate($hash,"state","Mehrere Gateways/Devices gefunden, bitte eines auswählen über selectDevice",1);
+                return;
+              }
             }
             
       if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
         readingsSingleUpdate($hash,"gw",$response_body,1);  # im Reading 'gw' merken
-        readingsSingleUpdate($hash,"number_of_gateways",scalar @gwa,1);
+        readingsSingleUpdate($hash,"number_of_gateways",scalar keys %devices,1);
       }
 
-        vitoconnect_getInstallation($hash);
-        vitoconnect_getInstallationFeatures($hash);
+        # Alle Infos besorgt, rest nur für logResponceOnce
+        if ($hash->{".logResponseOnce"} )   {
+          vitoconnect_getInstallation($hash);
+          vitoconnect_getInstallationFeatures($hash);
+        } else {
+          vitoconnect_getResource($hash);
+        }
     }
     else                                    {   # Fehler aufgetreten
         Log3($name,1,$name." - An error occured: ".$err);
@@ -3376,6 +3110,7 @@ sub vitoconnect_getInstallationCallback {
     my ( $param, $err, $response_body ) = @_;
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
+    my $gw           = AttrVal( $name, 'vitoconnect_serial', 0 );
 
     if ($err eq "")                         {
         Log3 $name, 4, "$name - getInstallationCallback went ok";
@@ -3389,32 +3124,18 @@ sub vitoconnect_getInstallationCallback {
         }
         if ($hash->{".logResponseOnce"})    {
             my $dir         = path( AttrVal("global","logdir","log"));
-            my $file        = $dir->child("installation.json");
+            my $file        = $dir->child("installation_" . $gw . ".json");
             my $file_handle = $file->openw_utf8();
             $file_handle->print(Dumper($items));                # Datei 'installation.json' schreiben
             Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
         }
-        my $id = $items->{data}[0]->{id};
-        if ($id eq "")                      {
-            Log3($name,1,$name." - Something went wrong. Will retry");
-            InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-        }
-        else {
-            if ( defined(AttrVal( $name, 'vitoconnect_installationID', 0 )) 
-                 && AttrVal( $name, 'vitoconnect_installationID', 0 ) ne "" 
-                 && AttrVal( $name, 'vitoconnect_installationID', 0 ) != 0 )  {
-               $hash->{".installation"} = AttrVal( $name, 'vitoconnect_installationID', 0 );
-               Log3 $name, 5, "$name - getInstallationCallback installationID overwritten with: ".$hash->{".installation"};
-            } else {
-            $hash->{".installation"} = $items->{data}[0]->{id};
-            }
-            Log3 $name, 5, "$name - getInstallationCallback installationID set with: ".$hash->{".installation"};
             
-            if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
-               readingsSingleUpdate( $hash, "installation", $response_body, 1 );
-            }
-            vitoconnect_getDevice($hash);
+        if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
+           readingsSingleUpdate( $hash, "installation", $response_body, 1 );
         }
+        
+        vitoconnect_getDevice($hash);
+
     }
     else {
         Log3 $name, 1, "$name - An error occured: $err";
@@ -3431,7 +3152,7 @@ sub vitoconnect_getInstallationFeatures {
     my ($hash)       = @_;
     my $name         = $hash->{NAME};
     my $access_token = $hash->{".access_token"};
-    my $installation = $hash->{".installation"};
+    my $installation = AttrVal( $name, 'vitoconnect_installationID', 0 );
     
     
     # installation features      #Fixme call only once
@@ -3458,6 +3179,7 @@ sub vitoconnect_getInstallationFeaturesCallback {
     my ( $param, $err, $response_body ) = @_;
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
+    my $gw           = AttrVal( $name, 'vitoconnect_serial', 0 );
     
     my $decode_json = eval {decode_json($response_body)};
     if ((defined($err) && $err ne "") || (defined($decode_json->{statusCode}) && $decode_json->{statusCode} ne "")) {   # Fehler aufgetreten
@@ -3468,6 +3190,15 @@ sub vitoconnect_getInstallationFeaturesCallback {
         }
     }
     else                                                {   #  kein Fehler aufgetreten
+    
+         if ($hash->{".logResponseOnce"})    {
+            my $dir         = path( AttrVal("global","logdir","log"));
+            my $file        = $dir->child("installation_features_" . $gw . ".json");
+            my $file_handle = $file->openw_utf8();
+            $file_handle->print(Dumper($decode_json));                # Datei 'installation.json' schreiben
+            Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
+        }
+        
         if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
         readingsSingleUpdate($hash,"installation_features",$response_body,1);   # im Reading 'installation_features' merken
         }
@@ -3475,6 +3206,8 @@ sub vitoconnect_getInstallationFeaturesCallback {
     return;
     }
 }
+
+
 #####################################################################################################################
 # Abfrage Device-ID
 #####################################################################################################################
@@ -3482,38 +3215,22 @@ sub vitoconnect_getDevice {
     my ($hash)       = @_;
     my $name         = $hash->{NAME};
     my $access_token = $hash->{".access_token"};
-    my $installation = $hash->{".installation"};
-    my $gw           = $hash->{".gw"};
-    my @gwa          = @{$hash->{".gwa"}};
+    my $installation = AttrVal( $name, 'vitoconnect_installationID', 0 );
+    my $gw           = AttrVal( $name, 'vitoconnect_serial', 0 );
     
-    if (defined($gw) && $gw ne "") {
-        Log(5,$name.", - getDevice gw found reduce gwa: ".$gw);
-        @gwa = $gw;
-    }
-    my $index = 0;
-    my $last = 0;
-    my $last_index = $#gwa;
-    foreach ( @gwa ) {
-    $gw = $_;
     Log(5,$name.", --getDevice gw for call set: ".$gw);
-    if ($index == $last_index) { 
-     $last = 1;
-    }
+
     my $param        = {
-#       url     => $apiURL
         url     => $iotURL_V1
         ."installations/".$installation."/gateways/".$gw."/devices",
         hash    => $hash,
-        gw      => $gw,
-        last     => $last,
         header  => "Authorization: Bearer ".$access_token,
         timeout => $hash->{timeout},
         sslargs => { SSL_verify_mode => 0 },
         callback => \&vitoconnect_getDeviceCallback
     };
     HttpUtils_NonblockingGet($param);
-    $index++;
-    };
+
     return;
 }
 
@@ -3525,8 +3242,8 @@ sub vitoconnect_getDeviceCallback {
     my ( $param, $err, $response_body ) = @_;
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
-    my $gw = $param->{gw};
-    my $last = $param->{last};
+    my $gw   = AttrVal( $name, 'vitoconnect_serial', 0 );
+
    Log(5,$name.", -getDeviceCallback get device gw: ".$gw);
     if ($err eq "")                         {
         Log3 $name, 4, "$name - getDeviceCallback went ok";
@@ -3550,7 +3267,7 @@ sub vitoconnect_getDeviceCallback {
         if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
           readingsSingleUpdate($hash,"device",$response_body,1);    # im Reading 'device' merken
         }
-        vitoconnect_getFeatures($hash,$gw,$last);
+        vitoconnect_getFeatures($hash);
     }
     else {
         if ((defined($err) && $err ne "")) {    # Fehler aufgetreten
@@ -3569,29 +3286,21 @@ sub vitoconnect_getDeviceCallback {
 # Abruf GW Features, Anwort von Abfrage Device-ID
 #   https://documentation.viessmann.com/static/iot/overview
 #####################################################################################################################
-
 sub vitoconnect_getFeatures {
     my ($hash)       =  shift;  # Übergabe-Parameter
-    my $gw           =  shift;
-    my $last         =  shift;
     my $name         = $hash->{NAME};
     my $access_token = $hash->{".access_token"};
-    my $installation = $hash->{".installation"};
-    #my $gw           = $hash->{".gw"};
+    my $installation = AttrVal( $name, 'vitoconnect_installationID', 0 );
+    my $gw           = AttrVal( $name, 'vitoconnect_serial', 0 );
     my $dev          = AttrVal($name,'vitoconnect_device',0);   # Attribut: vitoconnect_device (0,1), Standard: 0
 
     Log3($name,4,$name." - getFeatures went ok");
 
-# Service Documents -ToDo
-
 # Gateway features
     my $param = {
-#       url    => $apiURL
         url    => $iotURL_V2
         ."installations/".$installation."/gateways/".$gw."/features",
         hash   => $hash,
-        gw     => $gw,
-        last     => $last,
         header => "Authorization: Bearer ".$access_token,
         timeout => $hash->{timeout},
         sslargs => { SSL_verify_mode => 0 },
@@ -3607,21 +3316,11 @@ sub vitoconnect_getFeatures {
 # GW Features speichern
 #   https://documentation.viessmann.com/static/iot/overview
 #####################################################################################################################
-
 sub vitoconnect_getFeaturesCallback {
     my ( $param, $err, $response_body ) = @_;
     my $hash = $param->{hash};
     my $name = $hash->{NAME};
-    my $gw = $param->{gw};
-    my $last = $param->{last};
-    my @gwa = @{$hash->{".gwa"}};
-    my $gwFilter = $hash->{".gw"};
-    my $readingName ="gw_features";
-    
-    if (defined($gwFilter) && $gwFilter ne "") {
-        Log(5,$name.", -getFeaturesCallback feature gwFilter found reduce gwa: ".$gw);
-        @gwa = $gwFilter;
-    }
+    my $gw           = AttrVal( $name, 'vitoconnect_serial', 0 );
     
     my $decode_json = eval {decode_json($response_body)};
 
@@ -3633,129 +3332,20 @@ sub vitoconnect_getFeaturesCallback {
         }
     }   
     else                                                {   # kein Fehler aufgetreten
-    if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {
-    if (scalar @gwa > 1) {
-        $readingName = $readingName ."_". $gw;
-    };
-        readingsSingleUpdate($hash,$readingName,$response_body,1);  # im Reading 'gw_features' merken
-    }
-        vitoconnect_getResource_per_gw($hash,$gw,$last);
-    }
-}
-
-
-#####################################################################################################################
-# Errors bearbeiten
-#####################################################################################################################
-sub vitoconnect_errorHandling {
-    my ($hash,$items,$gw,$last) = @_;
-    my $name         = $hash->{NAME};
     
-    #Log3 $name, 1, "$name - errorHandling StatusCode: $items->{statusCode} ";
+      if ($hash->{".logResponseOnce"})    {
+            my $dir         = path( AttrVal("global","logdir","log"));
+            my $file        = $dir->child("gw_features_" . $gw . ".json");
+            my $file_handle = $file->openw_utf8();
+            $file_handle->print(Dumper($decode_json));                # Datei 'installation.json' schreiben
+            Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
+      }
     
-        if (!$items->{statusCode} eq "")    {
-            Log3 $name, 4,
-                "$name - statusCode: $items->{statusCode} "
-              . "errorType: $items->{errorType} "
-              . "message: $items->{message} "
-              . "error: $items->{error}";
-            readingsSingleUpdate(
-                $hash,
-                "state",
-                "statusCode: $items->{statusCode} "
-                  . "errorType: $items->{errorType} "
-                  . "message: $items->{message} "
-                  . "error: $items->{error}",
-                1
-            );
-            if ( $items->{statusCode} eq "401" ) {
-                #  EXPIRED TOKEN
-                vitoconnect_getRefresh($hash,$gw,$last);    # neuen Access-Token anfragen
-                return(1);
-            }
-            elsif ( $items->{statusCode} eq "404" ) {
-                # DEVICE_NOT_FOUND
-                readingsSingleUpdate($hash,"state","Device not found: Optolink prüfen!",1);
-                Log3 $name, 1, "$name - Device not found: Optolink prüfen!";
-                if ($last == 1 ) {
-                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-                }
-                return(1);
-            }
-            elsif ( $items->{statusCode} eq "429" ) {
-                # RATE_LIMIT_EXCEEDED
-                readingsSingleUpdate($hash,"state","Anzahl der möglichen API Calls in überschritten!",1);
-                Log3 $name, 1,
-                  "$name - Anzahl der möglichen API Calls in überschritten!";
-                if ($last == 1 ) {
-                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-                }
-                return(1);
-            }
-            elsif ( $items->{statusCode} eq "502" ) {
-                readingsSingleUpdate($hash,"state","temporärer API Fehler",1);
-                # DEVICE_COMMUNICATION_ERROR error: Bad Gateway
-                Log3 $name, 1, "$name - temporärer API Fehler";
-                if ($last == 1 ) {
-                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-                }
-                return(1);
-            }
-            else {
-                readingsSingleUpdate($hash,"state","unbekannter Fehler, bitte den Entwickler informieren!",1);
-                Log3 $name, 1, "$name - unbekannter Fehler: "
-                  . "Bitte den Entwickler informieren!";
-                Log3 $name, 1,
-                    "$name - statusCode: $items->{statusCode} "
-                  . "errorType: $items->{errorType} "
-                  . "message: $items->{message} "
-                  . "error: $items->{error}";
-                if ($last == 1 ) {
-                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-                }
-                return(1);
-            }
-        }
-};
-
-
-#####################################################################################################################
-# Get der Daten vom Gateway
-# per GW ist für die logOnce und fürs initializieren
-# Es wird in diesen Modi pro Gateway gerufen
-#####################################################################################################################
-sub vitoconnect_getResource_per_gw {
-    my ($hash)       = shift;               # Übergabe-Parameter
-    my $gw           = shift;
-    my $last         = shift;
-    my $name         = $hash->{NAME};   # Device-Name
-    my $access_token = $hash->{".access_token"};
-    my $installation = $hash->{".installation"};
-    my $dev          = AttrVal($name,'vitoconnect_device',0);
-
-    Log3($name,4,$name." - enter getResourceOnce");
-    Log3($name,4,$name." - access_token: ".substr($access_token,0,20)."...");
-    Log3($name,4,$name." - installation: ".$installation);
-    Log3($name,4,$name." - gw: ".$gw);
-    if ($access_token eq "" || $installation eq "" || $gw eq "") {  # noch kein: Token, ID, GW
-        if ($last == 1) {
-         vitoconnect_getCode($hash);
-        }
-        return;
+    if (AttrVal( $name, 'vitoconnect_gw_readings', 0 ) eq "1") {    
+        readingsSingleUpdate($hash,"gw_features",$response_body,1);  # im Reading 'gw_features' merken
     }
-    my $param = {
-        url => $iotURL_V2
-        ."installations/".$installation."/gateways/".$gw."/devices/".$dev."/features",
-        hash     => $hash,
-        gw       => $gw,
-        last     => $last,
-        header   => "Authorization: Bearer $access_token",
-        timeout  => $hash->{timeout},
-        sslargs  => { SSL_verify_mode => 0 },
-        callback => \&vitoconnect_getResourceCallback
-    };
-    HttpUtils_NonblockingGet($param);   # non-blocking aufrufen --> Antwort an: vitoconnect_getResourceCallback
-    return;
+        vitoconnect_getResource($hash);
+    }
 }
 
 
@@ -3765,63 +3355,32 @@ sub vitoconnect_getResource_per_gw {
 # Es wird im Sub entschieden ob für alle Gateways oder für eine vorgegeben Gateway Serial
 #####################################################################################################################
 sub vitoconnect_getResource {
-    my ($hash)       = @_;              # Übergabe-Parameter
+    my ($hash)       = shift;               # Übergabe-Parameter
     my $name         = $hash->{NAME};   # Device-Name
     my $access_token = $hash->{".access_token"};
-    my $installation = $hash->{".installation"};
-    my $gw           = $hash->{".gw"};
+    my $installation = AttrVal( $name, 'vitoconnect_installationID', 0 );
+    my $gw           = AttrVal( $name, 'vitoconnect_serial', 0 );
     my $dev          = AttrVal($name,'vitoconnect_device',0);
-    my $gwatemp      = $hash->{".gwa"};
-    my @gwa = ();
-    
-    if (defined($gwatemp) && $gwatemp ne "") {
-      @gwa = @{$gwatemp};
-    }
-    if (defined($gw) && $gw ne "") {
-        Log(5,$name.", - vitoconnect_getResource Resource gw found reduce gwa: ".$gw);
-        @gwa = $gw;
-    }
-    
-    my $index = 0;
-    my $last = 0;
-    my $last_index = $#gwa;
-    if ($last_index == -1)
-    {
-         Log3($name,3,$name." - getResource missing gateway information: will try to get it fresh");
-         vitoconnect_getCode($hash);
-    }
-    foreach ( @gwa ) {
-    $gw = $_;
-    Log3($name,4,$name." - enter getResource");
+
+    Log3($name,4,$name." - enter getResourceOnce");
     Log3($name,4,$name." - access_token: ".substr($access_token,0,20)."...");
     Log3($name,4,$name." - installation: ".$installation);
     Log3($name,4,$name." - gw: ".$gw);
     if ($access_token eq "" || $installation eq "" || $gw eq "") {  # noch kein: Token, ID, GW
-        Log3($name,3,$name." - getResource missing information Token: $access_token, Installation: $installation, Gateway: $gw");
-        if ($last == 1) {
-         Log3($name,3,$name." - getResource missing information: will try to get it fresh");
-         vitoconnect_getCode($hash);
-        }
+        vitoconnect_getCode($hash);
         return;
     }
-    if ($index == $last_index) { 
-     $last = 1;
-    }
     my $param = {
-#       url => $apiURL
         url => $iotURL_V2
         ."installations/".$installation."/gateways/".$gw."/devices/".$dev."/features",
         hash     => $hash,
         gw       => $gw,
-        last     => $last,
         header   => "Authorization: Bearer $access_token",
         timeout  => $hash->{timeout},
         sslargs  => { SSL_verify_mode => 0 },
         callback => \&vitoconnect_getResourceCallback
     };
     HttpUtils_NonblockingGet($param);   # non-blocking aufrufen --> Antwort an: vitoconnect_getResourceCallback
-    $index++;
-    };
     return;
 }
 
@@ -3835,20 +3394,10 @@ sub vitoconnect_getResourceCallback {
     my ($param,$err,$response_body) = @_;   # Übergabe-Parameter
     my $hash   = $param->{hash};
     my $name   = $hash->{NAME};
-    my $gw     = $param->{gw};
-    my $last   = $param->{last};
-    my @gwa    = @{$hash->{".gwa"}};
-    my $gwFilter = $hash->{".gw"};
+    my $gw     = AttrVal( $name, 'vitoconnect_serial', 0 );
     
     Log(5,$name.", -getResourceCallback started");
-    
-    if (defined($gwFilter) && $gwFilter ne "") {
-        Log(5,$name.", -getResourceCallback feature gwFilter found reduce gwa: ".$gw);
-        @gwa = $gwFilter;
-    }
-    
     Log3($name,5,$name." getResourceCallback calles with gw:".$gw); 
-    Log3($name,5,$name." getResourceCallback calles with number gwas:".scalar @gwa );
     
     if ($err eq "")                         {   # kein Fehler aufgetreten
         Log3($name,4,$name." - getResourceCallback went ok");
@@ -3857,13 +3406,11 @@ sub vitoconnect_getResourceCallback {
         if ($@)                             {   # Fehler beim JSON dekodieren
             readingsSingleUpdate($hash,"state","JSON error while request: ".$@,1);  # Reading 'state'
             Log3($name,1,$name.", vitoconnect_getResourceCallback: JSON error while request: ".$@);
-            if ($last == 1) {
              InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-            }
             return;
         }
         
-        $err = vitoconnect_errorHandling($hash,$items,$gw,$last);
+        $err = vitoconnect_errorHandling($hash,$items);
         if ($err ==1){
            return;
         }
@@ -3875,15 +3422,10 @@ sub vitoconnect_getResourceCallback {
             #$file_handle->print(Dumper($items));                       # Datei 'resource.json' schreiben
             $file_handle->print(Dumper($response_body));                        # Datei 'resource.json' schreiben
             Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
-            if ($last == 1) {
             $hash->{".logResponseOnce"} = 0;
-            }
         }
         
         $hash->{".response_$gw"} = $response_body;
-        #$Response = $response_body;
-        
-        my $gwaCount = scalar @gwa;
         
         Log(5,$name.", translations count:".scalar keys %translations);
         Log(5,$name.", RequestListMapping count:".scalar keys %$RequestListMapping);
@@ -3947,11 +3489,6 @@ sub vitoconnect_getResourceCallback {
                 {   
                     next;
                 }
-                
-                # If no serial is defined and there is more than one gateway add the gateway serial to the readings
-                if ($gwaCount > 1) {
-                 $Reading = $Reading ."_". $gw;
-                };
                 
                 my $Type  = $properties->{$key}->{type};
                 my $Value = $properties->{$key}->{value};
@@ -4020,15 +3557,18 @@ sub vitoconnect_getResourceCallback {
     else {
         Log3($name,1,$name." - An error occured: ".$err);
     }
-    if ($last == 1 ) {
-      InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-    }
+      
+	InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
     Log(5,$name.", -getResourceCallback ended");
     
     
     return;
 }
 
+
+#####################################################################################################################
+# Implementierung power readings die nur sehr selten kommen in ein logbares reading füllen (asSingleValue)
+#####################################################################################################################
 sub vitoconnect_getPowerLast {
     my ($hash, $name, $Reading) = @_;
 
@@ -4077,78 +3617,15 @@ sub vitoconnect_getPowerLast {
 }
 
 
-#   https://documentation.viessmann.com/static/getting-started
-#V1     https://documentation.viessmann.com/gatewayfeatures-featuresapi-mw-iot/v1#gatewayfeatures-featuresapi-mw-iot_Execute_gateway_feature_command
-
-#   Execute gateway feature command
-#       https://api.viessmann.com/iot/v1/features/gateways/{gatewaySerial}/features/{featureName}/commands/{commandName}
-#   Execute installation gateway device feature command
-#       https://api.viessmann.com/iot/v1/features/installations/{installationId}/gateways/{gatewaySerial}/devices/{deviceId}/features/{featureName}/commands/{commandName}
-#   Execute installation gateway feature command
-#       https://api.viessmann.com/iot/v1/features/installations/{installationId}/gateways/{gatewaySerial}/features/{featureName}/commands/{commandName}
-#   Update gateway device
-#       https://api.viessmann.com/iot/v1/equipment/installations/{installationId}/gateways/{gatewaySerial}/devices/{deviceId}
-
-#V2     https://documentation.viessmann.com/gatewayfeatures-featuresapi-mw-iot/v2#gatewayfeatures-featuresapi-mw-iot_Execute_gateway_feature_command
-#   Execute gateway feature command
-#       https://api.viessmann.com/iot/v2/features/gateways/{gatewaySerial}/features/{featureName}/commands/{commandName}
-#   Execute installation gateway device feature command
-#   https://documentation.viessmann.com/installationgatewaydevicefeatures-featuresapi-mw-iot/v2#installationgatewaydevicefeatures-featuresapi-mw-iot_Execute_installation_gateway_device_feature_command
-#             https://api.viessmann.com/iot/v2/features/installations/{installationId}/gateways/{gatewaySerial}/devices/{deviceId}/features/{featureName}/commands/{commandName}
-
-
-#   https://documentation.viessmann.com/gatewaydevices-equipment-mw-iot/v1#gatewaydevices-equipment-mw-iot_Update_gateway_device
-#       https://api.viessmann.com/iot/v1/equipment/installations/{installationId}/gateways/{gatewaySerial}/devices/{deviceId}
-#       curl --request PUT \
-#       --url https://api.viessmann.com/iot/v1/equipment/installations/{installationId}/gateways/{gatewaySerial}/devices/{deviceId} \
-#       --header 'content-type: application/json' \
-#       --header 'authorization: auth_token' \
-#       --data '{
-#           "boilerSerial": "123456789012",
-#           "bmuSerial": "123456789012"
-#       }'
-#set    Heiz_ViessMann HK1_Betriebsart standby
-
-sub vitoconnect_check_gwa_and_get_gw {
-    my ($hash,$name) = @_;  # Übergabe-Parameter
-    my $gw           = $hash->{".gw"};                  # Internal: .gw
-    my $gwatemp      = $hash->{".gwa"};
-    my @gwa = ();
-
-    if (defined($gwatemp) && $gwatemp ne "") {
-      @gwa = @{$gwatemp};
-    }
-    
-    if (defined($gw) && $gw ne "") {
-        Log3($name,3,$name.", -vitoconnect_check_gwa_and_get_gw: gwFilter found reduce gwa: ".$gw);
-        @gwa = $gw;
-    }
-    
-    if (scalar @gwa > 1) {
-        readingsSingleUpdate($hash,"Aktion_Status","Fehler: mehr als ein Gateway. Bitte Device Doku lesen und vitoconnect_serial setzen",1);    # Reading 'Aktion_Status' setzen
-        return(-1);
-    } elsif (scalar @gwa == 0) {
-        readingsSingleUpdate($hash,"Aktion_Status","Fehler: kein Gateway gefunden. Bitte Entwickler melden mit gw.json aud FHEM log",1);    # Reading 'Aktion_Status' setzen
-        return(-1);
-    } else {
-     $gw = $gwa[0];
-    }
-    return $gw;
-}
-
 #####################################################################################################################
 # Setzen von Daten
 #####################################################################################################################
 sub vitoconnect_action {
     my ($hash,$feature,$data,$name,$opt,@args ) = @_;   # Übergabe-Parameter
     my $access_token = $hash->{".access_token"};        # Internal: .access_token
-    my $installation = $hash->{".installation"};        # Internal: .installation   
-    my $dev          = AttrVal($name,'vitoconnect_device',0);   # Attribut: vitoconnect_device
-    
-    my $gw = vitoconnect_check_gwa_and_get_gw($hash,$name);
-    if ($gw == -1){
-        return;
-    }
+    my $installation = AttrVal( $name, 'vitoconnect_installationID', 0 );
+    my $gw           = AttrVal( $name, 'vitoconnect_serial', 0 );
+    my $dev          = AttrVal($name,'vitoconnect_device',0);
     
     my $param        = {
         url => $iotURL_V2
@@ -4176,7 +3653,7 @@ sub vitoconnect_action {
     }
     else                                                                {   # Befehl korrekt ausgeführt
         readingsSingleUpdate($hash,"Aktion_Status","OK: ".$opt." ".$Text,1);    # Reading 'Aktion_Status' setzen
-        #Log3($name,1,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt: ".$err." :: ".$msg); # TODO: Wieder weg machen $err
+        Log3($name,1,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt: ".$err." :: ".$msg); # TODO: Wieder weg machen $err
         Log3($name,3,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt"); 
         
         # Spezial Readings update
@@ -4197,12 +3674,79 @@ sub vitoconnect_action {
             $Text = "1";
         }
         readingsSingleUpdate($hash,$opt,$Text,1);   # Reading updaten
-		
+        
         
         Log3($name,4,$name.",vitoconnect_action: set feature:".$feature." data:".$data.", korrekt ausgefuehrt"); #4
     }
     return;
 }
+
+
+#####################################################################################################################
+# Errors bearbeiten
+#####################################################################################################################
+sub vitoconnect_errorHandling {
+    my ($hash,$items) = @_;
+    my $name          = $hash->{NAME};
+    
+    #Log3 $name, 1, "$name - errorHandling StatusCode: $items->{statusCode} ";
+    
+        if (!$items->{statusCode} eq "")    {
+            Log3 $name, 4,
+                "$name - statusCode: $items->{statusCode} "
+              . "errorType: $items->{errorType} "
+              . "message: $items->{message} "
+              . "error: $items->{error}";
+            readingsSingleUpdate(
+                $hash,
+                "state",
+                "statusCode: $items->{statusCode} "
+                  . "errorType: $items->{errorType} "
+                  . "message: $items->{message} "
+                  . "error: $items->{error}",
+                1
+            );
+            if ( $items->{statusCode} eq "401" ) {
+                #  EXPIRED TOKEN
+                vitoconnect_getRefresh($hash);    # neuen Access-Token anfragen
+                return(1);
+            }
+            elsif ( $items->{statusCode} eq "404" ) {
+                # DEVICE_NOT_FOUND
+                readingsSingleUpdate($hash,"state","Device not found: Optolink prüfen!",1);
+                Log3 $name, 1, "$name - Device not found: Optolink prüfen!";
+                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+                return(1);
+            }
+            elsif ( $items->{statusCode} eq "429" ) {
+                # RATE_LIMIT_EXCEEDED
+                readingsSingleUpdate($hash,"state","Anzahl der möglichen API Calls in überschritten!",1);
+                Log3 $name, 1,
+                  "$name - Anzahl der möglichen API Calls in überschritten!";
+                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+                return(1);
+            }
+            elsif ( $items->{statusCode} eq "502" ) {
+                readingsSingleUpdate($hash,"state","temporärer API Fehler",1);
+                # DEVICE_COMMUNICATION_ERROR error: Bad Gateway
+                Log3 $name, 1, "$name - temporärer API Fehler";
+                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+                return(1);
+            }
+            else {
+                readingsSingleUpdate($hash,"state","unbekannter Fehler, bitte den Entwickler informieren!",1);
+                Log3 $name, 1, "$name - unbekannter Fehler: "
+                  . "Bitte den Entwickler informieren!";
+                Log3 $name, 1,
+                    "$name - statusCode: $items->{statusCode} "
+                  . "errorType: $items->{errorType} "
+                  . "message: $items->{message} "
+                  . "error: $items->{error}";
+                InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+                return(1);
+            }
+        }
+};
 
 
 #####################################################################################################################
@@ -4275,6 +3819,21 @@ sub vitoconnect_ReadKeyValue {
 }
 
 
+#####################################################################################################################
+# verschlüsselte Werte löschen
+#####################################################################################################################
+sub DeleteKeyValue {
+    my ($hash,$kName) = @_;     # Übergabe-Parameter
+    my $name = $hash->{NAME};
+
+    Log3( $name, 5,$name." - called function Delete()" );
+
+    my $index = $hash->{TYPE}."_".$hash->{NAME}."_".$kName;
+    setKeyValue( $index, undef );
+
+    return;
+}
+
 1;
 
 
@@ -4330,6 +3889,14 @@ sub vitoconnect_ReadKeyValue {
         <a id="vitoconnect-set-update"></a>
         <li><code>update</code><br>
             update readings immeadiatlely</li>
+        <a id="vitoconnect-set-selectDevice"></a>
+        <li><code>selectDevice</code><br>
+            Has to be used if you have more than one Viessmann Gateway/Device. You have to choose one Viessmann Device per FHEM Device.<br>
+            You will be notified in the FHEM device state that you have to execute the set and the Viessmann devices will be prefilled.<br>
+            Selecting one Viessmann device and executing the set will fill the attributes vitoconnect_serial and vitoconnect_installationId.<br>
+            If you have only one Viessmann device, this will be done automatically for you.<br>
+            You should save the change after initialization or set.
+        </li>
         <a id="vitoconnect-set-clearReadings"></a>
         <li><code>clearReadings</code><br>
             clear all readings immeadiatlely</li> 
@@ -4495,24 +4062,21 @@ sub vitoconnect_ReadKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_serial"></a>
         <li><i>vitoconnect_serial</i>:<br>
-            Define the serial of the gateway to be used.<br>
-            If there is only one gateway, you do not have to care about it.<br>
-            If you have more than one gateway, by default all readings of all gateways are collected, and every reading is appended by the gateway serial.<br>
-            For example, if you have two gateways, this will be two calls to the API.<br>
-            The Viessmann API has a limit of 1400 calls a day.<br>
-            It makes sense in a hybrid setup to define two devices for every gateway.<br>
-            With this, you can get the data of the heat pump more frequently than the data of the burner.<br>
-            You can get the serials by setting vitoconnect_gw_readings = 1 and checking the corresponding readings gw and number_of_gateways.<br>
-            If you want to use the setters, please set a vitoconnect_serial.<br>
-            If not, you will get an error message in Aktion_Status to do so.
+		    This handling will now take place at the initilization of the FHEM device.<br>
+			You will be notified that you have to exectue set <name> selectDevice <serial><br>
+			The possible serials will be prefilled.<br>
+			You do not need to set this attribute manually.<br>
+            Defines the serial of the viessmann device to be used.<br>
+            If there is only one viessmann device, you do not have to care about it.<br>
         </li>
         <a id="vitoconnect-attr-vitoconnect_installationID"></a>
         <li><i>vitoconnect_installationID</i>:<br>
-            Define the installationID of your installation to be used. This must be the installationID corresponding to yourt given serial.<br>
-            If there is only one installationID, you do not have to care about it.<br>
-            If you have more than one installationID, you have to provide it together with the serial.<br>
-            This will be fixed in a feature release but for now you have to define the installationID if you have more than one.<br>
-            The data can be obtained from gw.json or installation.json.
+		    This handling will now take place at the initilization of the FHEM device.<br>
+			You will be notified that you have to exectue set <name> selectDevice <serial><br>
+			The possible serials will be prefilled.<br>
+			You do not need to set this attribute manually.<br>
+            Defines the installationID of the viessmann device to be used.<br>
+            If there is only one viessmann device, you do not have to care about it.<br>
         </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
@@ -4574,6 +4138,14 @@ sub vitoconnect_ReadKeyValue {
         <a id="vitoconnect-set-update"></a>
         <li><code>update</code><br>
             Lese sofort die aktuellen Werte aus</li>
+		<a id="vitoconnect-set-selectDevice"></a>
+        <li><code>selectDevice</code><br>
+            Muss verwendet werden, wenn Sie mehr als ein Viessmann Gateway/Device haben. Sie müssen ein Viessmann Gerät pro FHEM Gerät auswählen.<br>
+            Sie werden im FHEM Gerätestatus benachrichtigt, dass Sie den Set Befehl ausführen müssen. Die Viessmann Geräte werden vorgefüllt.<br>
+            Wenn Sie ein Viessmann Gerät auswählen und den Set Befehl ausführen, werden die Attribute vitoconnect_serial und vitoconnect_installationId gefüllt.<br>
+            Wenn Sie nur ein Viessmann Gerät haben, wird dies automatisch für Sie erledigt.<br>
+            Sie sollten die Änderung nach der Initialisierung oder dem Set speichern.
+        </li>
         <a id="vitoconnect-set-clearReadings"></a>
         <li><code>clearReadings</code><br>
             Lösche sofort alle Werte</li> 
@@ -4737,24 +4309,21 @@ sub vitoconnect_ReadKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_serial"></a>
         <li><i>vitoconnect_serial</i>:<br>
-            Definieren Sie die Seriennummer des zu verwendenden Gateways.<br>
-            Wenn es nur ein Gateway gibt, müssen Sie sich nicht darum kümmern.<br>
-            Wenn Sie mehr als ein Gateway haben, werden standardmäßig alle Readings aller Gateways gesammelt, und jedes Reading wird mit der Gateway-Seriennummer versehen.<br>
-            Wenn Sie beispielsweise zwei Gateways haben, werden zwei API-Aufrufe durchgeführt.<br>
-            Die Viessmann-API hat ein Limit von 1400 Aufrufen pro Tag.<br>
-            Es macht in einem hybriden Setup Sinn, zwei Geräte für jedes Gateway zu definieren.<br>
-            Damit können Sie die Daten der Wärmepumpe häufiger als die Daten des Brenners abrufen.<br>
-            Sie können die Seriennummern erhalten, indem Sie vitoconnect_gw_readings = 1 setzen und die entsprechenden Readings gw und number_of_gateways überprüfen.<br>            
-            Wenn Sie die Setter verwenden möchten, setzen Sie bitte eine vitoconnect_serial.<br>
-            Andernfalls erhalten Sie eine Fehlermeldung in Aktion_Status, dies zu tun.
+            Dieses Attribut wird nun bei der Initialisierung des FHEM-Geräts befüllt.<br>
+            Sie werden benachrichtigt, dass Sie den Befehl set <name> selectDevice <serial> ausführen müssen.<br>
+            Die möglichen Seriennummern werden vorausgefüllt.<br>
+            Sie müssen dieses Attribut nicht manuell setzen.<br>
+            Definiert die Seriennummer des zu verwendenden Viessmann Geräts.<br>
+            Wenn es nur ein Viessmann Gerät gibt, müssen Sie sich darum nicht kümmern.<br>
         </li>
         <a id="vitoconnect-attr-vitoconnect_installationID"></a>
         <li><i>vitoconnect_installationID</i>:<br>
-            Definieren Sie die installationID Ihrer Installation, die verwendet werden soll. Dies muss die installationID sein, die Ihrer angegebenen Seriennummer entspricht.<br>
-            Wenn es nur eine installationID gibt, müssen Sie sich nicht darum kümmern.<br>
-            Wenn Sie mehr als eine installationID haben, müssen Sie diese zusammen mit der Seriennummer angeben.<br>
-            Dies wird in einem zukünftigen Feature-Release behoben, aber im Moment müssen Sie die installationID definieren, wenn Sie mehr als eine haben.<br>
-            Die Daten können aus gw.json oder installation.json bezogen werden.
+            Dieses Attribut wird nun bei der Initialisierung des FHEM-Geräts befüllt.<br>
+            Sie werden benachrichtigt, dass Sie den Befehl set <name> selectDevice <serial> ausführen müssen.<br>
+            Die möglichen Seriennummern werden vorausgefüllt.<br>
+            Sie müssen dieses Attribut nicht manuell setzen.<br>
+            Definiert die installationID des zu verwendenden Viessmann Geräts.<br>
+            Wenn es nur ein Viessmann Gerät gibt, müssen Sie sich darum nicht kümmern.<br>
         </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
