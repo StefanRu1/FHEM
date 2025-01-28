@@ -91,6 +91,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.6.2"  => "28.01.2025  Very small bugfixes ",
   "0.6.1"  => "28.01.2025  Rework of module documentation",
   "0.6.0"  => "23.01.2025  Total rebuild of initialization and gw handling. In case of more than one installation or gw you have to set it via".
                           "selectDevice in the set of the device. The attributes vitoconnect_serial and vitoconnect_installationID will be populated".
@@ -1440,7 +1441,7 @@ return $val;
 sub vitoconnect_Set_New {
     my ($hash, $name, $opt, @args) = @_;
     my $gw = AttrVal( $name, 'vitoconnect_serial', 0 );
-    my $val;
+    my $val = "";
     
     my $Response = $hash->{".response_$gw"};
     if ($Response) {  # Überprüfen, ob $Response Daten enthält
@@ -3853,7 +3854,7 @@ sub DeleteKeyValue {
     <a href="https://github.com/thetrueavatar/Viessmann-Api">thetrueavatar</a>.<br>
     
     You need the user and password from the ViCare App account.<br>
-	Additionally also an apiKey, see set apiKey.<br>
+    Additionally also an apiKey, see set apiKey.<br>
      
     For details, see: <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (German)</a><br><br>
      
@@ -3880,7 +3881,7 @@ sub DeleteKeyValue {
         Example:<br>
         <code>define vitoconnect vitoconnect user@mail.xx fakePassword 60</code><br>
         <code>set vitoconnect password correctPassword</code>
-		<code>set vitoconnect apiKey Client-ID</code>
+        <code>set vitoconnect apiKey Client-ID</code>
         <br><br>
     </ul>
     <br>
@@ -4089,7 +4090,7 @@ sub DeleteKeyValue {
     <a href="https://github.com/thetrueavatar/Viessmann-Api">thetrueavatar</a><br>
     
     Es werden Benutzername und Passwort des ViCare App-Kontos benötigt.<br>
-	Zusätzlich auch eine Client-ID, siehe set apiKey.<br>
+    Zusätzlich auch eine Client-ID, siehe set apiKey.<br>
      
     Weitere Details sind im <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (deutsch)</a> zu finden.<br><br>
      
@@ -4113,7 +4114,7 @@ sub DeleteKeyValue {
         Beispiel:<br>
         <code>define vitoconnect vitoconnect user@mail.xx fakePassword 60</code><br>
         <code>set vitoconnect password correctPassword 60</code>
-		<code>set vitoconnect apiKey Client-ID</code>
+        <code>set vitoconnect apiKey Client-ID</code>
         <br><br>
     </ul>
     <br>
