@@ -91,6 +91,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.6.1"  => "28.01.2025  Rework of module documentation",
   "0.6.0"  => "23.01.2025  Total rebuild of initialization and gw handling. In case of more than one installation or gw you have to set it via".
                           "selectDevice in the set of the device. The attributes vitoconnect_serial and vitoconnect_installationID will be populated".
                           "handling of getting installation and serial changed. StoredValues are now deleted. Other fixes and developments",
@@ -2631,7 +2632,7 @@ sub vitoconnect_Set_Roger {
 sub vitoconnect_Attr {
     my ($cmd,$name,$attr_name,$attr_value ) = @_;
     
-	Log(5,$name.", ".$cmd ." vitoconnect_: ".$attr_name." value: ".$attr_value);
+    Log(5,$name.", ".$cmd ." vitoconnect_: ".$attr_name." value: ".$attr_value);
     if ($cmd eq "set")  {
         if ($attr_name eq "vitoconnect_raw_readings" )      {
             if ($attr_value !~ /^0|1$/)                     {
@@ -2730,7 +2731,7 @@ sub vitoconnect_GetUpdate {
     if (IsDisabled($name))      {   # Device disabled
         Log3($name,4,$name." - device disabled");
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);   # nach Intervall erneut versuchen
-		return;
+        return;
     }
     else                        {   # Device nicht disabled
         vitoconnect_getResource($hash);
@@ -2813,7 +2814,7 @@ sub vitoconnect_getCodeCallback {
         readingsSingleUpdate($hash,"state","Login failure. Check password and apiKey",1);   # Reading 'state' setzen
         Log3($name,1,$name." - Login failure. Check password and apiKey");
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);   # Forum: #880
-		return;
+        return;
     }
     return;
 }
@@ -2878,13 +2879,13 @@ sub vitoconnect_getAccessTokenCallback {
             Log3($name,1,$name." - Access Token: nicht definiert");
             Log3($name,5,$name." - Received response: ".$response_body."\n");
             InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-			return;
+            return;
         }
     }
     else                            {   # Fehler bei Antwort
         Log3($name,1,$name.",vitoconnect_getAccessTokenCallback - getAccessToken: An error occured: ".$err);
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-		return;
+        return;
     }
     return;
 }
@@ -2952,7 +2953,7 @@ sub vitoconnect_getRefreshCallback {
     else {
         Log3 $name, 1, "$name - getRefresh: An error occured: $err";
         InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
-		return;
+        return;
     }
     return;
 }
@@ -3036,7 +3037,7 @@ sub vitoconnect_getGwCallback {
                       && AttrVal( $name, 'vitoconnect_serial', 0 ) != 0 )  {
               # Attribute sind gesetzt, nichts zu tun
               Log3($name,5,$name." - getGW all atributes set already attr: instID: ".AttrVal( $name, 'vitoconnect_installationID', 0 ).
-			                                                            ", serial: ".AttrVal( $name, 'vitoconnect_serial', 0 ));
+                                                                        ", serial: ".AttrVal( $name, 'vitoconnect_serial', 0 ));
               } else 
               {
               # Prüfungen der Gateways und weiteres vorgehen 
@@ -3558,7 +3559,7 @@ sub vitoconnect_getResourceCallback {
         Log3($name,1,$name." - An error occured: ".$err);
     }
       
-	InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
+    InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
     Log(5,$name.", -getResourceCallback ended");
     
     
@@ -3593,11 +3594,11 @@ sub vitoconnect_getPowerLast {
     
     # Hash für die Key-Value-Paare
     my %data;
-    my $readingLastTimestamp = ReadingsTimestamp($name,$Reading.".day.asSingleValue",'');
-    my $lastTS = "0000000000";
-    if ($readingLastTimestamp ne "") {
-    $lastTS = time_str2num($readingLastTimestamp);
-    }
+    my $readingLastTimestamp = ReadingsTimestamp($name,$Reading.".day.asSingleValue","0000000000");
+    #my $lastTS = "0000000000";
+    #if ($readingLastTimestamp ne "") {
+    my $lastTS = time_str2num($readingLastTimestamp);
+    #}
     Log(5,$name.", -setpower: readinglast: $readingLastTimestamp lastTS $lastTS");
     
     # Werte den entsprechenden Tagen zuordnen, start mit 1, letzten Tag ausschließen weil unvollständig
@@ -3653,7 +3654,7 @@ sub vitoconnect_action {
     }
     else                                                                {   # Befehl korrekt ausgeführt
         readingsSingleUpdate($hash,"Aktion_Status","OK: ".$opt." ".$Text,1);    # Reading 'Aktion_Status' setzen
-        Log3($name,1,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt: ".$err." :: ".$msg); # TODO: Wieder weg machen $err
+        #Log3($name,1,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt: ".$err." :: ".$msg); # TODO: Wieder weg machen $err
         Log3($name,3,$name.",vitoconnect_action: set name:".$name." opt:".$opt." text:".$Text.", korrekt ausgefuehrt"); 
         
         # Spezial Readings update
@@ -3847,39 +3848,40 @@ sub DeleteKeyValue {
 <h3>vitoconnect</h3>
 <ul>
     <i>vitoconnect</i> implements a device for the Viessmann API
-    <a href="https://www.viessmann.de/de/viessmann-apps/vitoconnect.html">Vitoconnect100</a>
-    based on investigation of
-    <a href="https://github.com/thetrueavatar/Viessmann-Api">thetrueavatar</a><br>
+    <a href="https://www.viessmann.de/de/viessmann-apps/vitoconnect.html">Vitoconnect100</a> or E3 One Base
+    based on the investigation of
+    <a href="https://github.com/thetrueavatar/Viessmann-Api">thetrueavatar</a>.<br>
     
-     You need the user and password from the ViCare App account.<br>
+    You need the user and password from the ViCare App account.<br>
+	Additionally also an apiKey, see set apiKey.<br>
      
-     For details see: <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (german)</a><br><br>
+    For details, see: <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (German)</a><br><br>
      
-     vitoconnect needs the following libraries:
-     <ul>
-     <li>Path::Tiny</li>
-     <li>JSON</li>
-     <li>JSON:XS</li>
-     <li>DateTime</li>
-     </ul>   
+    vitoconnect requires the following libraries:
+    <ul>
+        <li>Path::Tiny</li>
+        <li>JSON</li>
+        <li>JSON:XS</li>
+        <li>DateTime</li>
+    </ul>   
          
-     Use <code>sudo apt install libtypes-path-tiny-perl libjson-perl libdatetime-perl</code> or 
-     install the libraries via cpan. 
-     Otherwise you will get an error message "cannot load module vitoconnect".
+    Use <code>sudo apt install libtypes-path-tiny-perl libjson-perl libdatetime-perl</code> or 
+    install the libraries via CPAN. 
+    Otherwise, you will get an error message: "cannot load module vitoconnect".
      
     <br><br>
     <a id="vitoconnect-define"></a>
     <b>Define</b>
     <ul>
         <code>define &lt;name&gt; vitoconnect &lt;user&gt; &lt;password&gt; &lt;interval&gt;</code><br>
-        It is a good idea to use a fake password here an set the correct one later because it is
-        readable in the detail view of the device
+        It is a good idea to use a fake password here and set the correct one later because it is
+        readable in the detail view of the device.
         <br><br>
         Example:<br>
         <code>define vitoconnect vitoconnect user@mail.xx fakePassword 60</code><br>
-        <code>set vitoconnect password correctPassword 60</code>
+        <code>set vitoconnect password correctPassword</code>
+		<code>set vitoconnect apiKey Client-ID</code>
         <br><br>
-                
     </ul>
     <br>
     
@@ -3888,106 +3890,92 @@ sub DeleteKeyValue {
     <ul>
         <a id="vitoconnect-set-update"></a>
         <li><code>update</code><br>
-            update readings immeadiatlely</li>
+            Update readings immediately.</li>
         <a id="vitoconnect-set-selectDevice"></a>
         <li><code>selectDevice</code><br>
             Has to be used if you have more than one Viessmann Gateway/Device. You have to choose one Viessmann Device per FHEM Device.<br>
-            You will be notified in the FHEM device state that you have to execute the set and the Viessmann devices will be prefilled.<br>
-            Selecting one Viessmann device and executing the set will fill the attributes vitoconnect_serial and vitoconnect_installationId.<br>
+            You will be notified in the FHEM device state that you have to execute the set, and the Viessmann devices will be prefilled.<br>
+            Selecting one Viessmann device and executing the set will fill the attributes <code>vitoconnect_serial</code> and <code>vitoconnect_installationId</code>.<br>
             If you have only one Viessmann device, this will be done automatically for you.<br>
             You should save the change after initialization or set.
         </li>
         <a id="vitoconnect-set-clearReadings"></a>
         <li><code>clearReadings</code><br>
-            clear all readings immeadiatlely</li> 
+            Clear all readings immediately.</li> 
         <a id="vitoconnect-set-password"></a>
         <li><code>password passwd</code><br>
-            store password in key store</li>
+            Store password in the key store.</li>
         <a id="vitoconnect-set-logResponseOnce"></a>
         <li><code>logResponseOnce</code><br>
-            Dumps the json response of Viessmann server to entities.json,
-            gw.json, actions.json in FHEM log directory.
-            If you have more than one gateway the gateway serial is attached to the files.</li>
+            Dumps the JSON response of the Viessmann server to <code>entities.json</code>,
+            <code>gw.json</code>, and <code>actions.json</code> in the FHEM log directory.
+            If you have more than one gateway, the gateway serial is attached to the filenames.</li>
         <a id="vitoconnect-set-apiKey"></a>
         <li><code>apiKey</code><br>
-            Since viessmann changed to V2 API you need to create an API Key under https://developer.viessmann.com/.
-            Create an account, add a new client (google reCAPTCHA disabled, Redirect URI = http://localhost:4200/).
-            Copy the Client ID here as apiKey</li>
-        <br>
-        <code>New setters used if vitoconnect_raw_readings = 1, if you have more than one gateway serial you must define it to use the setters<code>
-        <code>Old static mapping setters, only used if attr vitoconnect_raw_readings = 0<code>
+            You need to create an API Key under <a href="https://developer.viessmann.com/">https://developer.viessmann.com/</a>.
+            Create an account, add a new client (disable Google reCAPTCHA, Redirect URI = <code>http://localhost:4200/</code>).
+            Copy the Client ID here as <code>apiKey</code>.</li>
+        <li><code>Setters for your device will be available depending on the mapping method you choose with the help of the attributes <code>vitoconnect_raw_readings</code> or <code>vitoconnect_mapping_roger</code>.</code><br>
+            New setters are used if <code>vitoconnect_raw_readings = 1</code>.
+            The default is the static mapping of the old SVN version.
+            For this, the following setters are available:</li>
         <li><code>HKn_Heizkurve_Niveau shift</code><br>
-            set shift of heating curve for HKn</li>
+            Set shift of heating curve for HKn.</li>
         <li><code>HKn_Heizkurve_Steigung slope</code><br>
-            set slope of heating curve for HKn</li>
-      
+            Set slope of heating curve for HKn.</li>
         <li><code>HKn_Urlaub_Start_Zeit start</code><br>
-            set holiday start time for HKn<br>
-            start has to look like this: 2019-02-02</li>
+            Set holiday start time for HKn.<br>
+            <code>start</code> has to look like this: <code>2019-02-02</code>.</li>
         <li><code>HKn_Urlaub_Ende_Zeit end</code><br>
-            set holiday end time for HKn<br>
-            end has to look like this: 2019-02-16</li>
+            Set holiday end time for HKn.<br>
+            <code>end</code> has to look like this: <code>2019-02-16</code>.</li>
         <li><code>HKn_Urlaub_stop</code> <br>
-            remove holiday start and end time for HKn</li>
-            
+            Remove holiday start and end time for HKn.</li>
         <li><code>HKn_Zeitsteuerung_Heizung schedule</code><br>
-            sets the heating schedule for HKn in JSON format <br>
-            e.g. {"mon":[],"tue":[],"wed":[],"thu":[],"fri":[],"sat":[],"sun":[]} is completly off
-            and {"mon":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
+            Sets the heating schedule for HKn in JSON format.<br>
+            Example: <code>{"mon":[],"tue":[],"wed":[],"thu":[],"fri":[],"sat":[],"sun":[]}</code> is completely off,
+            and <code>{"mon":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
             "tue":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
             "wed":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
             "thu":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
             "fri":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
             "sat":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
-            "sun":[{"mode":"on","start":"00:00","end":"24:00","position":0}]} is on 24/7</li>
-
+            "sun":[{"mode":"on","start":"00:00","end":"24:00","position":0}]}</code> is on 24/7.</li>
         <li><code>HKn_Betriebsart heating,standby</code> <br>
-            sets HKn_Betriebsart to heating,standby</li>
-
+            Sets <code>HKn_Betriebsart</code> to <code>heating</code> or <code>standby</code>.</li>
         <li><code>WW_Betriebsart balanced,off</code> <br>
-            sets WW_Betriebsart to balanced,off</li>
-
+            Sets <code>WW_Betriebsart</code> to <code>balanced</code> or <code>off</code>.</li>
         <li><code>HKn_Soll_Temp_comfort_aktiv activate,deactivate</code> <br>
-            activate/deactivate comfort temperature for HKn</li>
+            Activate/deactivate comfort temperature for HKn.</li>
         <li><code>HKn_Soll_Temp_comfort targetTemperature</code><br>
-            set comfort target temperatur for HKn</li>
-        <li><code>HKn_Soll_Temp_eco_aktiv activate,deactivate </code><br>
-            activate/deactivate eco temperature for HKn</li>
-            
+            Set comfort target temperature for HKn.</li>
+        <li><code>HKn_Soll_Temp_eco_aktiv activate,deactivate</code><br>
+            Activate/deactivate eco temperature for HKn.</li>
         <li><code>HKn_Soll_Temp_normal targetTemperature</code><br>
-            sets the normale target temperature for HKn, where targetTemperature is an
-            integer between 3 and 37</li>
+            Sets the normal target temperature for HKn, where <code>targetTemperature</code> is an
+            integer between 3 and 37.</li>
         <li><code>HKn_Soll_Temp_reduziert targetTemperature</code><br>
-            sets the reduced target temperature for HKn, where targetTemperature is an
-            integer between 3 and 37 </li>
-        
+            Sets the reduced target temperature for HKn, where <code>targetTemperature</code> is an
+            integer between 3 and 37.</li>
         <li><code>HKn_Name name</code><br>
-            sets the name of the circuit for  HKn</li>      
-        
+            Sets the name of the circuit for HKn.</li>      
         <li><code>WW_einmaliges_Aufladen activate,deactivate</code><br>
-            activate or deactivate one time charge for hot water </li>
-       
-        <li><code>WW_Zirkulationspumpe_Zeitplan  schedule</code><br>
-            sets the schedule in JSON format for hot water circulation pump </li>
+            Activate or deactivate one-time charge for hot water.</li>
+        <li><code>WW_Zirkulationspumpe_Zeitplan schedule</code><br>
+            Sets the schedule in JSON format for the hot water circulation pump.</li>
         <li><code>WW_Zeitplan schedule</code> <br>
-            sets the schedule in JSON format for hot water </li>
-            
-#       <li><code>WW_Haupttemperatur targetTemperature</code><br>
-#           targetTemperature is an integer between 10 and 60<br>
-#           sets hot water main temperature to targetTemperature </li>
+            Sets the schedule in JSON format for hot water.</li>
         <li><code>WW_Solltemperatur targetTemperature</code><br>
-            targetTemperature is an integer between 10 and 60<br>
-            sets hot water temperature to targetTemperature </li>    
-
+            <code>targetTemperature</code> is an integer between 10 and 60.<br>
+            Sets hot water temperature to <code>targetTemperature</code>.</li>    
         <li><code>Urlaub_Start_Zeit start</code><br>
-            set holiday start time <br>
-            start has to look like this: 2019-02-02</li>
+            Set holiday start time.<br>
+            <code>start</code> has to look like this: <code>2019-02-02</code>.</li>
         <li><code>Urlaub_Ende_Zeit end</code><br>
-            set holiday end time <br>
-            end has to look like this: 2019-02-16</li>
+            Set holiday end time.<br>
+            <code>end</code> has to look like this: <code>2019-02-16</code>.</li>
         <li><code>Urlaub_stop</code> <br>
-            remove holiday start and end time </li>
-       
+            Remove holiday start and end time.</li>
     </ul>
     </ul>
     <br>
@@ -3995,7 +3983,7 @@ sub DeleteKeyValue {
     <a name="vitoconnectget"></a>
     <b>Get</b><br>
     <ul>
-        nothing to get here 
+        Nothing to get here. 
     </ul>
     <br>
     
@@ -4004,7 +3992,7 @@ sub DeleteKeyValue {
 <ul>
     <code>attr &lt;name&gt; &lt;attribute&gt; &lt;value&gt;</code>
     <br><br>
-    See <a href="http://fhem.de/commandref.html#attr">commandref#attr</a> for more info about the attr command.
+    See <a href="http://fhem.de/commandref.html#attr">commandref#attr</a> for more info about the <code>attr</code> command.
     <br><br>
     Attributes:
     <ul>
@@ -4018,17 +4006,17 @@ sub DeleteKeyValue {
         </li>           
         <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
         <li><i>vitoconnect_raw_readings</i>:<br>         
-            Create readings with plain JSON names like 'heating.circuits.0.heating.curve.slope' instead of German identifiers (old mapping), mapping attribute, or translation attribute.<br>
+            Create readings with plain JSON names like <code>heating.circuits.0.heating.curve.slope</code> instead of German identifiers (old mapping), mapping attribute, or translation attribute.<br>
             When using raw readings, setters will be created dynamically matching the raw readings (new).<br>
             I recommend this setting since you get everything as dynamically as possible from the API.<br>
-            You can use stateFormat or userReadings to display your important readings with a readable name.<br>
-            If vitoconnect_raw_readings is set, no mapping will be used.
+            You can use <code>stateFormat</code> or <code>userReadings</code> to display your important readings with a readable name.<br>
+            If <code>vitoconnect_raw_readings</code> is set, no mapping will be used.
         </li>
         <a id="vitoconnect-attr-vitoconnect_disable_raw_readings"></a>
         <li><i>vitoconnect_disable_raw_readings</i>:<br>         
             This setting will disable the additional generation of raw readings.<br>
-            This means you will only see the readings which are explicitly mapped in your choosen mapping.<br>
-            This setting will not be active if you also choose vitoconnect_raw_readings = 1.
+            This means you will only see the readings that are explicitly mapped in your chosen mapping.<br>
+            This setting will not be active if you also choose <code>vitoconnect_raw_readings = 1</code>.
         </li>
         <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
         <li><i>vitoconnect_gw_readings</i>:<br>         
@@ -4036,47 +4024,47 @@ sub DeleteKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_actions_active"></a>
         <li><i>vitoconnect_actions_active</i>:<br>
-            Create readings for actions, e.g., 'heating.circuits.0.heating.curve.setCurve.setURI'.
+            Create readings for actions, e.g., <code>heating.circuits.0.heating.curve.setCurve.setURI</code>.
         </li>
         <a id="vitoconnect-attr-vitoconnect_mappings"></a>
         <li><i>vitoconnect_mappings</i>:<br>
             Define your own mapping of key-value pairs instead of using the built-in ones. The format has to be:<br>
-            mapping<br>
+            <code>mapping<br>
             {  'device.serial.value' => 'device_serial',<br>
                 'heating.boiler.sensors.temperature.main.status' => 'status',<br>
-                'heating.boiler.sensors.temperature.main.value' => 'haupt_temperatur'}<br>
-            Mapping will be preferred over old mapping.
+                'heating.boiler.sensors.temperature.main.value' => 'haupt_temperatur'}</code><br>
+            Mapping will be preferred over the old mapping.
         </li>
         <a id="vitoconnect-attr-vitoconnect_translations"></a>
         <li><i>vitoconnect_translations</i>:<br>
             Define your own translation; it will translate every word part by part. The format has to be:<br>
-            translation<br>
+            <code>translation<br>
             {  'device' => 'gerät',<br>
                 'messages' => 'nachrichten',<br>
-                'errors' => 'fehler'}<br>
+                'errors' => 'fehler'}</code><br>
             Translation will be preferred over mapping and old mapping.
         </li>
         <a id="vitoconnect-attr-vitoconnect_mapping_roger"></a>
         <li><i>vitoconnect_mapping_roger</i>:<br>
-            Use the mapping from Roger from 8. November (https://forum.fhem.de/index.php?msg=1292441) instead of the SVN mapping.
+            Use the mapping from Roger from 8. November (<a href="https://forum.fhem.de/index.php?msg=1292441">https://forum.fhem.de/index.php?msg=1292441</a>) instead of the SVN mapping.
         </li>
         <a id="vitoconnect-attr-vitoconnect_serial"></a>
         <li><i>vitoconnect_serial</i>:<br>
-		    This handling will now take place at the initilization of the FHEM device.<br>
-			You will be notified that you have to exectue set <name> selectDevice <serial><br>
-			The possible serials will be prefilled.<br>
-			You do not need to set this attribute manually.<br>
-            Defines the serial of the viessmann device to be used.<br>
-            If there is only one viessmann device, you do not have to care about it.<br>
+            This handling will now take place during the initialization of the FHEM device.<br>
+            You will be notified that you have to execute <code>set &lt;name&gt; selectDevice &lt;serial&gt;</code>.<br>
+            The possible serials will be prefilled.<br>
+            You do not need to set this attribute manually.<br>
+            Defines the serial of the Viessmann device to be used.<br>
+            If there is only one Viessmann device, you do not have to care about it.<br>
         </li>
         <a id="vitoconnect-attr-vitoconnect_installationID"></a>
         <li><i>vitoconnect_installationID</i>:<br>
-		    This handling will now take place at the initilization of the FHEM device.<br>
-			You will be notified that you have to exectue set <name> selectDevice <serial><br>
-			The possible serials will be prefilled.<br>
-			You do not need to set this attribute manually.<br>
-            Defines the installationID of the viessmann device to be used.<br>
-            If there is only one viessmann device, you do not have to care about it.<br>
+            This handling will now take place during the initialization of the FHEM device.<br>
+            You will be notified that you have to execute <code>set &lt;name&gt; selectDevice &lt;serial&gt;</code>.<br>
+            The possible serials will be prefilled.<br>
+            You do not need to set this attribute manually.<br>
+            Defines the installationID of the Viessmann device to be used.<br>
+            If there is only one Viessmann device, you do not have to care about it.<br>
         </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
@@ -4084,7 +4072,7 @@ sub DeleteKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_device"></a>
         <li><i>vitoconnect_device</i>:<br>
-            You can define the device 0 (standard) or 1. I cannot test this because I have only one device.
+            You can define the device 0 (default) or 1. I cannot test this because I have only one device.
         </li>
     </ul>
 </ul>
@@ -4096,39 +4084,37 @@ sub DeleteKeyValue {
 <h3>vitoconnect</h3>
 <ul>
     <i>vitoconnect</i> implementiert ein Gerät für die Viessmann API
-    <a href="https://www.viessmann.de/de/viessmann-apps/vitoconnect.html">Vitoconnect100</a>
+    <a href="https://www.viessmann.de/de/viessmann-apps/vitoconnect.html">Vitoconnect100</a> oder E3 One Base,
     basierend auf der Untersuchung von
     <a href="https://github.com/thetrueavatar/Viessmann-Api">thetrueavatar</a><br>
     
-    Sie benötigen Benutzer und Passwort des ViCare App-Kontos.<br>
+    Es werden Benutzername und Passwort des ViCare App-Kontos benötigt.<br>
+	Zusätzlich auch eine Client-ID, siehe set apiKey.<br>
      
-    Für Details siehe: <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (deutsch)</a><br><br>
+    Weitere Details sind im <a href="https://wiki.fhem.de/wiki/Vitoconnect">FHEM Wiki (deutsch)</a> zu finden.<br><br>
      
-    vitoconnect benötigt die folgenden Bibliotheken:
+    Für die Nutzung werden die folgenden Bibliotheken benötigt:
     <ul>
     <li>Path::Tiny</li>
     <li>JSON</li>
-    <li>JSON:XS</li>
+    <li>JSON::XS</li>
     <li>DateTime</li>
     </ul>   
          
-    Verwenden Sie <code>sudo apt install libtypes-path-tiny-perl libjson-perl libdatetime-perl</code> oder 
-    installieren Sie die Bibliotheken über cpan. 
-    Andernfalls erhalten Sie eine Fehlermeldung "cannot load module vitoconnect".
+    Die Bibliotheken können mit dem Befehl <code>sudo apt install libtypes-path-tiny-perl libjson-perl libdatetime-perl</code> installiert werden oder über cpan. Andernfalls tritt eine Fehlermeldung "cannot load module vitoconnect" auf.
      
     <br><br>
     <a id="vitoconnect-define"></a>
     <b>Define</b>
     <ul>
         <code>define &lt;name&gt; vitoconnect &lt;user&gt; &lt;password&gt; &lt;interval&gt;</code><br>
-        Es ist eine gute Idee, hier ein falsches Passwort zu verwenden und das richtige später zu setzen, da es
-        in der Detailansicht des Geräts lesbar ist.
+        Es wird empfohlen, zunächst ein falsches Passwort zu verwenden und dieses später zu ändern, da es in der Detailansicht des Geräts sichtbar ist.
         <br><br>
         Beispiel:<br>
         <code>define vitoconnect vitoconnect user@mail.xx fakePassword 60</code><br>
         <code>set vitoconnect password correctPassword 60</code>
+		<code>set vitoconnect apiKey Client-ID</code>
         <br><br>
-                
     </ul>
     <br>
     
@@ -4137,112 +4123,89 @@ sub DeleteKeyValue {
     <ul>
         <a id="vitoconnect-set-update"></a>
         <li><code>update</code><br>
-            Lese sofort die aktuellen Werte aus</li>
-		<a id="vitoconnect-set-selectDevice"></a>
+            Liest sofort die aktuellen Werte aus.</li>
+        <a id="vitoconnect-set-selectDevice"></a>
         <li><code>selectDevice</code><br>
-            Muss verwendet werden, wenn Sie mehr als ein Viessmann Gateway/Device haben. Sie müssen ein Viessmann Gerät pro FHEM Gerät auswählen.<br>
-            Sie werden im FHEM Gerätestatus benachrichtigt, dass Sie den Set Befehl ausführen müssen. Die Viessmann Geräte werden vorgefüllt.<br>
-            Wenn Sie ein Viessmann Gerät auswählen und den Set Befehl ausführen, werden die Attribute vitoconnect_serial und vitoconnect_installationId gefüllt.<br>
-            Wenn Sie nur ein Viessmann Gerät haben, wird dies automatisch für Sie erledigt.<br>
-            Sie sollten die Änderung nach der Initialisierung oder dem Set speichern.
+            Wird benötigt, wenn mehr als ein Viessmann Gateway/Device vorhanden ist. Ein Viessmann Gerät muss für jedes FHEM Gerät ausgewählt werden.<br>
+            Der Set-Befehl muss ausgeführt werden, nachdem die Viessmann Geräte im Gerätestatus vorgefüllt sind.<br>
+            Bei Auswahl eines Viessmann Geräts und Ausführung des Set-Befehls werden die Attribute vitoconnect_serial und vitoconnect_installationId gefüllt.<br>
+            Bei nur einem Viessmann Gerät erfolgt dies automatisch.<br>
+            Es wird empfohlen, die Änderungen nach der Initialisierung oder dem Set zu speichern.
         </li>
         <a id="vitoconnect-set-clearReadings"></a>
         <li><code>clearReadings</code><br>
-            Lösche sofort alle Werte</li> 
+            Löscht sofort alle Werte.</li> 
         <a id="vitoconnect-set-password"></a>
         <li><code>password passwd</code><br>
-            Speichere das Passwort im Schlüsselbund</li>
+            Speichert das Passwort im Schlüsselbund.</li>
         <a id="vitoconnect-set-logResponseOnce"></a>
         <li><code>logResponseOnce</code><br>
-            Speichert die JSON-Antwort des Viessmann-Servers in entities.json,
-            gw.json, actions.json im FHEM-Log-Verzeichnis.
-            Wenn Sie mehr als ein Gateway haben, wird die Gateway-Seriennummer an die Dateien angehängt.</li>
+            Speichert die JSON-Antwort des Viessmann-Servers in den Dateien entities.json, gw.json und actions.json im FHEM-Log-Verzeichnis.
+            Wenn mehrere Gateways vorhanden sind, wird die Seriennummer des Gateways an die Dateinamen angehängt.</li>
         <a id="vitoconnect-set-apiKey"></a>
         <li><code>apiKey</code><br>
-            Da Viessmann auf die V2 API umgestellt hat, müssen Sie einen API-Schlüssel unter https://developer.viessmann.com/ erstellen.
-            Erstellen Sie ein Konto, fügen Sie einen neuen Client hinzu (Google reCAPTCHA deaktiviert, Redirect URI = http://localhost:4200/).
-            Kopieren Sie die Client-ID hier als apiKey</li>
-        <br>
-        <code>Neue Setter werden verwendet, wenn vitoconnect_raw_readings = 1, wenn Sie mehr als eine Gateway-Seriennummer haben, müssen Sie diese definieren, um die Setter zu verwenden<code>
-        <code>Alte statische Mapping-Setter, werden nur verwendet, wenn attr vitoconnect_raw_readings = 0<code>
+            Ein API-Schlüssel muss unter https://developer.viessmann.com/ erstellt werden.
+            Dazu ein Konto anlegen, einen neuen Client hinzufügen (Google reCAPTCHA deaktivieren, Redirect URI = http://localhost:4200/).
+            Die Client-ID muss als apiKey hier eingefügt werden.</li>
+        <li><code>Die Setter für das Gerät hängen von der gewählten Mappingmethode ab, die durch die Attribute vitoconnect_raw_readings oder vitoconnect_mapping_roger gesteuert wird.</code><br>
+            Neue Setter werden verwendet, wenn vitoconnect_raw_readings = 1 gesetzt ist.
+            Standardmäßig wird das statische Mapping der alten SVN-Version verwendet.
+            Die folgenden Setter sind verfügbar:
+        </li>
         <li><code>HKn_Heizkurve_Niveau shift</code><br>
-            Setzt die Verschiebung der Heizkurve für HKn</li>
+            Setzt die Verschiebung der Heizkurve für HKn.</li>
         <li><code>HKn_Heizkurve_Steigung slope</code><br>
-            Setzt die Steigung der Heizkurve für HKn</li>
-      
+            Setzt die Steigung der Heizkurve für HKn.</li>
         <li><code>HKn_Urlaub_Start_Zeit start</code><br>
-            Setzt die Urlaubsstartzeit für HKn<br>
-            Start muss so aussehen: 2019-02-02</li>
+            Setzt die Urlaubsstartzeit für HKn.<br>
+            Start muss im Format: 2019-02-02 angegeben werden.</li>
         <li><code>HKn_Urlaub_Ende_Zeit end</code><br>
-            Setzt die Urlaubsendzeit für HKn<br>
-            Ende muss so aussehen: 2019-02-16</li>
-        <li><code>HKn_Urlaub_stop</code> <br>
-            Entfernt die Urlaubsstart- und Endzeit für HKn</li>
-            
+            Setzt die Urlaubsendzeit für HKn.<br>
+            Ende muss im Format: 2019-02-16 angegeben werden.</li>
+        <li><code>HKn_Urlaub_stop</code><br>
+            Entfernt die Urlaubsstart- und Endzeit für HKn.</li>
         <li><code>HKn_Zeitsteuerung_Heizung schedule</code><br>
-            Setzt den Heizplan für HKn im JSON-Format <br>
-            z.B. {"mon":[],"tue":[],"wed":[],"thu":[],"fri":[],"sat":[],"sun":[]} ist komplett aus
-            und {"mon":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
-            "tue":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
-            "wed":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
-            "thu":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
-            "fri":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
-            "sat":[{"mode":"on","start":"00:00","end":"24:00","position":0}],
-            "sun":[{"mode":"on","start":"00:00","end":"24:00","position":0}]} ist 24/7 an</li>
-
-        <li><code>HKn_Betriebsart heating,standby</code> <br>
-             Setzt HKn_Betriebsart auf heizen, standby</li>
-
-        <li><code>WW_Betriebsart balanced,off</code> <br>
-            Setzt WW_Betriebsart auf ausgeglichen, aus</li>
-        
-        <li><code>HKn_Soll_Temp_comfort_aktiv activate,deactivate</code> <br>
-            Aktiviert/deaktiviert die Komforttemperatur für HKn</li>
+            Setzt den Heizplan für HKn im JSON-Format.<br>
+            Beispiel: {"mon":[],"tue":[],"wed":[],"thu":[],"fri":[],"sat":[],"sun":[]} für keinen Betrieb und {"mon":[{"mode":"on","start":"00:00","end":"24:00","position":0}],...} für 24/7 Betrieb.</li>
+        <li><code>HKn_Betriebsart heating,standby</code><br>
+            Setzt den Betriebsmodus für HKn auf heizen oder standby.</li>
+        <li><code>WW_Betriebsart balanced,off</code><br>
+            Setzt den Betriebsmodus für Warmwasser auf ausgeglichen oder aus.</li>
+        <li><code>HKn_Soll_Temp_comfort_aktiv activate,deactivate</code><br>
+            Aktiviert/deaktiviert die Komforttemperatur für HKn.</li>
         <li><code>HKn_Soll_Temp_comfort targetTemperature</code><br>
-            Setzt die Komfortzieltemperatur für HKn</li>
-        <li><code>HKn_Soll_Temp_eco_aktiv activate,deactivate </code><br>
-            Aktiviert/deaktiviert die Ökotemperatur für HKn</li>
-            
+            Setzt die Komfortzieltemperatur für HKn.</li>
+        <li><code>HKn_Soll_Temp_eco_aktiv activate,deactivate</code><br>
+            Aktiviert/deaktiviert die Ökotemperatur für HKn.</li>
         <li><code>HKn_Soll_Temp_normal targetTemperature</code><br>
-            Setzt die normale Zieltemperatur für HKn, wobei targetTemperature ein
-            Integer zwischen 3 und 37 ist</li>
+            Setzt die normale Zieltemperatur für HKn (zwischen 3 und 37 Grad Celsius).</li>
         <li><code>HKn_Soll_Temp_reduziert targetTemperature</code><br>
-            Setzt die reduzierte Zieltemperatur für HKn, wobei targetTemperature ein
-            Integer zwischen 3 und 37 ist</li>
-        
+            Setzt die reduzierte Zieltemperatur für HKn (zwischen 3 und 37 Grad Celsius).</li>
         <li><code>HKn_Name name</code><br>
-            Setzt den Namen des Kreislaufs für HKn</li>      
-        
+            Setzt den Namen des Kreislaufs für HKn.</li>      
         <li><code>WW_einmaliges_Aufladen activate,deactivate</code><br>
-            Aktiviert oder deaktiviert einmaliges Aufladen für Warmwasser</li>
-        
+            Aktiviert oder deaktiviert einmaliges Aufladen für Warmwasser.</li>
         <li><code>WW_Zirkulationspumpe_Zeitplan schedule</code><br>
-            Setzt den Zeitplan im JSON-Format für die Warmwasserzirkulationspumpe</li>
-        <li><code>WW_Zeitplan schedule</code> <br>
-            Setzt den Zeitplan im JSON-Format für Warmwasser</li>
-            
-        # <li><code>WW_Haupttemperatur targetTemperature</code><br>
-        # targetTemperature ist ein Integer zwischen 10 und 60<br>
-        # Setzt die Haupttemperatur des Warmwassers auf targetTemperature</li>
+            Setzt den Zeitplan im JSON-Format für die Warmwasserzirkulationspumpe.</li>
+        <li><code>WW_Zeitplan schedule</code><br>
+            Setzt den Zeitplan im JSON-Format für Warmwasser.</li>
         <li><code>WW_Solltemperatur targetTemperature</code><br>
-            targetTemperature ist ein Integer zwischen 10 und 60<br>
-            Setzt die Warmwassertemperatur auf targetTemperature</li>    
-        
+            Setzt die Warmwassertemperatur (zwischen 10 und 60 Grad Celsius) auf targetTemperature.</li>    
         <li><code>Urlaub_Start_Zeit start</code><br>
-            Setzt die Urlaubsstartzeit <br>
-            Start muss so aussehen: 2019-02-02</li>
+            Setzt die Urlaubsstartzeit.<br>
+            Start muss im Format: 2019-02-02 angegeben werden.</li>
         <li><code>Urlaub_Ende_Zeit end</code><br>
-            Setzt die Urlaubsendzeit <br>
-            Ende muss so aussehen: 2019-02-16</li>
-        <li><code>Urlaub_stop</code> <br>
-            Entfernt die Urlaubsstart- und Endzeit</li>
+            Setzt die Urlaubsendzeit.<br>
+            Ende muss im Format: 2019-02-16 angegeben werden.</li>
+        <li><code>Urlaub_stop</code><br>
+            Entfernt die Urlaubsstart- und Endzeit.</li>
     </ul>
 </ul>
 <br>
     <a name="vitoconnectget"></a>
       <b>Get</b><br>
         <ul>
-            nichts zum Abrufen hier
+            Keine Daten zum Abrufen verfügbar.
         </ul>
 <br>
 
@@ -4251,7 +4214,7 @@ sub DeleteKeyValue {
 <ul>
     <code>attr &lt;name&gt; &lt;attribute&gt; &lt;value&gt;</code>
     <br><br>
-    Siehe <a href="http://fhem.de/commandref.html#attr">commandref#attr</a> für weitere Informationen über den attr-Befehl.
+    Weitere Informationen zum attr-Befehl sind in der <a href="http://fhem.de/commandref.html#attr">commandref#attr</a> zu finden.
     <br><br>
     Attribute:
     <ul>
@@ -4265,21 +4228,21 @@ sub DeleteKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_raw_readings"></a>
         <li><i>vitoconnect_raw_readings</i>:<br>         
-            Erstellt Readings mit einfachen JSON-Namen wie 'heating.circuits.0.heating.curve.slope' anstelle von deutschen Bezeichnern (altes Mappping), mapping Attribute, oder translation Attribute.<br>
-            Werden raw Readings verwendet werden die setter dynamisch erstellt, die den raw Readings entsprechen (neu).<br>
-            Ich empfehle diese Einstellung, da Sie alles so dynamisch wie möglich von der API erhalten.<br>
-            Sie können stateFormat oder userReadings verwenden, um Ihre wichtigen Readings mit einem lesbaren Namen anzuzeigen.<br>
+            Erstellt Readings mit einfachen JSON-Namen wie 'heating.circuits.0.heating.curve.slope' anstelle von deutschen Bezeichnern (altes Mapping), Mapping-Attributen oder Übersetzungen.<br>
+            Wenn raw Readings verwendet werden, werden die Setter dynamisch erstellt, die den raw Readings entsprechen.<br>
+            Diese Einstellung wird empfohlen, um die Daten so dynamisch wie möglich von der API zu erhalten.<br>
+            stateFormat oder userReadings können verwendet werden, um wichtige Readings mit einem lesbaren Namen anzuzeigen.<br>
             Wenn vitoconnect_raw_readings gesetzt ist, wird kein Mapping verwendet.
         </li>
         <a id="vitoconnect-attr-vitoconnect_disable_raw_readings"></a>
         <li><i>vitoconnect_disable_raw_readings</i>:<br>
-            Diese Einstellung deaktiviert die zusätzliche Generierung von raw Readings.<br>
-            Das bedeutet, dass du nur die Messwerte siehst, die in deinem gewählten Mapping explizit zugeordnet sind.<br>
-            Diese Einstellung ist nicht aktiv, wenn du auch vitoconnect_raw_readings = 1 auswählst.
+            Deaktiviert die zusätzliche Generierung von raw Readings.<br>
+            Es werden nur die Messwerte angezeigt, die im gewählten Mapping explizit zugeordnet sind.<br>
+            Diese Einstellung wird nicht aktiv, wenn vitoconnect_raw_readings = 1 gesetzt ist.
         </li>
         <a id="vitoconnect-attr-vitoconnect_gw_readings"></a>
         <li><i>vitoconnect_gw_readings</i>:<br>         
-            Erstellt ein Reading vom Gateway, einschließlich Informationen, wenn Sie mehr als ein Gateway haben.
+            Erstellt ein Reading vom Gateway, einschließlich Informationen, wenn mehrere Gateways vorhanden sind.
         </li>
         <a id="vitoconnect-attr-vitoconnect_actions_active"></a>
         <li><i>vitoconnect_actions_active</i>:<br>
@@ -4287,43 +4250,37 @@ sub DeleteKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_mappings"></a>
         <li><i>vitoconnect_mappings</i>:<br>
-            Definieren Sie Ihre eigene Zuordnung von Schlüssel-Wert-Paaren anstelle der eingebauten. Das Format muss sein:<br>
+            Definiert eigene Zuordnungen von Schlüssel-Wert-Paaren anstelle der eingebauten Zuordnungen. Das Format muss wie folgt sein:<br>
             mapping<br>
             {  'device.serial.value' => 'device_serial',<br>
                 'heating.boiler.sensors.temperature.main.status' => 'status',<br>
                 'heating.boiler.sensors.temperature.main.value' => 'haupt_temperatur'}<br>
-            Die Zuordnung wird gegenüber der alten Zuordnung bevorzugt.
+            Die eigene Zuordnung hat Vorrang vor der alten Zuordnung.
         </li>
         <a id="vitoconnect-attr-vitoconnect_translations"></a>
         <li><i>vitoconnect_translations</i>:<br>
-            Definieren Sie Ihre eigene Übersetzung; sie wird jedes Wort Teil für Teil übersetzen. Das Format muss sein:<br>
+            Definiert eigene Übersetzungen für Wörter, die dann Teil für Teil übersetzt werden. Das Format muss wie folgt sein:<br>
             translation<br>
             {  'device' => 'gerät',<br>
                 'messages' => 'nachrichten',<br>
                 'errors' => 'fehler'}<br>
-            Die Übersetzung wird gegenüber der Zuordnung und der alten Zuordnung bevorzugt.
+            Die eigene Übersetzung hat Vorrang vor der Zuordnung und der alten Zuordnung.
         </li>
         <a id="vitoconnect-attr-vitoconnect_mapping_roger"></a>
         <li><i>vitoconnect_mapping_roger</i>:<br>
-            Verwenden Sie das Mapping von Roger vom 8. November (https://forum.fhem.de/index.php?msg=1292441) anstelle der SVN-Zuordnung.
+            Verwendet das Mapping von Roger vom 8. November (https://forum.fhem.de/index.php?msg=1292441) anstelle der SVN-Zuordnung.
         </li>
         <a id="vitoconnect-attr-vitoconnect_serial"></a>
         <li><i>vitoconnect_serial</i>:<br>
-            Dieses Attribut wird nun bei der Initialisierung des FHEM-Geräts befüllt.<br>
-            Sie werden benachrichtigt, dass Sie den Befehl set <name> selectDevice <serial> ausführen müssen.<br>
-            Die möglichen Seriennummern werden vorausgefüllt.<br>
-            Sie müssen dieses Attribut nicht manuell setzen.<br>
-            Definiert die Seriennummer des zu verwendenden Viessmann Geräts.<br>
-            Wenn es nur ein Viessmann Gerät gibt, müssen Sie sich darum nicht kümmern.<br>
+            Dieses Attribut wird bei der Initialisierung des FHEM-Geräts gesetzt.<br>
+            Der Befehl <code>set <name> selectDevice <serial></code> muss ausgeführt werden, wenn mehrere Seriennummern verfügbar sind.<br>
+            Dieses Attribut muss nicht manuell gesetzt werden, wenn nur ein Viessmann Gerät vorhanden ist.
         </li>
         <a id="vitoconnect-attr-vitoconnect_installationID"></a>
         <li><i>vitoconnect_installationID</i>:<br>
-            Dieses Attribut wird nun bei der Initialisierung des FHEM-Geräts befüllt.<br>
-            Sie werden benachrichtigt, dass Sie den Befehl set <name> selectDevice <serial> ausführen müssen.<br>
-            Die möglichen Seriennummern werden vorausgefüllt.<br>
-            Sie müssen dieses Attribut nicht manuell setzen.<br>
-            Definiert die installationID des zu verwendenden Viessmann Geräts.<br>
-            Wenn es nur ein Viessmann Gerät gibt, müssen Sie sich darum nicht kümmern.<br>
+            Dieses Attribut wird bei der Initialisierung des FHEM-Geräts gesetzt.<br>
+            Der Befehl <code>set <name> selectDevice <serial></code> muss ausgeführt werden, wenn mehrere Seriennummern verfügbar sind.<br>
+            Dieses Attribut muss nicht manuell gesetzt werden, wenn nur ein Viessmann Gerät vorhanden ist.
         </li>
         <a id="vitoconnect-attr-vitoconnect_timeout"></a>
         <li><i>vitoconnect_timeout</i>:<br>
@@ -4331,7 +4288,7 @@ sub DeleteKeyValue {
         </li>
         <a id="vitoconnect-attr-vitoconnect_device"></a>
         <li><i>vitoconnect_device</i>:<br>
-            Sie können das Gerät 0 (Standard) oder 1 definieren. Ich kann dies nicht testen, da ich nur ein Gerät habe.
+            Es kann zwischen den Geräten 0 (Standard) oder 1 gewählt werden. Diese Funktion konnte nicht getestet werden, da nur ein Gerät verfügbar ist.
         </li>
     </ul>
 </ul>
