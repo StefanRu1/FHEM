@@ -68,7 +68,7 @@ sub vitoconnect_action;                 #
 
 sub vitoconnect_StoreKeyValue;          # Werte verschlüsselt speichern
 sub vitoconnect_ReadKeyValue;           # verschlüsselte Werte auslesen
-sub DeleteKeyValue;                     # verschlüsselte Werte löschen
+sub vitoconnect_DeleteKeyValue;         # verschlüsselte Werte löschen
 
 
 package main;
@@ -91,6 +91,9 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.7.3"  => "16.02.2025  Write *.err file in case of error. Fixed DeleteKeyValue thanks Schlimbo",
+  "0.7.2"  => "07.02.2025  Attr logging improved",
+  "0.7.1"  => "07.02.2025  Code cleanups",
   "0.7.0"  => "06.02.2025  vitoconnect_installationID checked now for at least length 2, see https://forum.fhem.de/index.php?msg=1333072, error handling when setting attributs automatic introduced",
   "0.6.3"  => "04.02.2025  Small bug fixes, removed warnings",
   "0.6.2"  => "28.01.2025  Very small bugfixes ",
@@ -1246,7 +1249,7 @@ sub vitoconnect_Initialize {
     my ($hash) = @_;
     $hash->{DefFn}   = \&vitoconnect_Define;    # wird beim 'define' eines Gerätes aufgerufen
     $hash->{UndefFn} = \&vitoconnect_Undef;     # # wird beim Löschen einer Geräteinstanz aufgerufen
-    $hash->{DeleteFn} = \&DeleteKeyValue;
+    $hash->{DeleteFn} = \&vitoconnect_DeleteKeyValue;
     $hash->{SetFn}   = \&vitoconnect_Set;       # set-Befehle
     $hash->{GetFn}   = \&vitoconnect_Get;       # get-Befehle
     $hash->{AttrFn}  = \&vitoconnect_Attr;      # Attribute setzen/ändern/löschen
@@ -2635,7 +2638,7 @@ sub vitoconnect_Set_Roger {
 sub vitoconnect_Attr {
     my ($cmd,$name,$attr_name,$attr_value ) = @_;
     
-    Log(5,$name.", ".$cmd ." vitoconnect_: ".$attr_name." value: ".$attr_value);
+    Log(5,$name.", ".$cmd ." vitoconnect_: ".($attr_name // 'undef')." value: ".($attr_value // 'undef'));
     if ($cmd eq "set")  {
         if ($attr_name eq "vitoconnect_raw_readings" )      {
             if ($attr_value !~ /^0|1$/)                     {
@@ -2689,7 +2692,6 @@ sub vitoconnect_Attr {
             }
         }
         elsif ($attr_name eq "vitoconnect_serial")                      {
-            # Zur Zeit kein prüfung, einfacher String
             if (length($attr_value) != 16)                      {
                 my $err = "Invalid argument ".$attr_value." to ".$attr_name.". Must be 16 characters long.";
                 Log(1,$name.", vitoconnect_Attr: ".$err);
@@ -2697,7 +2699,6 @@ sub vitoconnect_Attr {
             }
         }
         elsif ($attr_name eq "vitoconnect_installationID")                      {
-            # Zur Zeit kein prüfung, einfacher String
             if (length($attr_value) < 2)                      {
                 my $err = "Invalid argument ".$attr_value." to ".$attr_name.". Must be at least 2 characters long.";
                 Log(1,$name.", vitoconnect_Attr: ".$err);
@@ -2710,6 +2711,7 @@ sub vitoconnect_Attr {
         }
         else                                                {
             # return "Unknown attr $attr_name";
+            Log(1,$name.", ".$cmd ." Unknow attr vitoconnect_: ".($attr_name // 'undef')." value: ".($attr_value // 'undef'));
         }
     }
     elsif ($cmd eq "del") {
@@ -3704,6 +3706,7 @@ sub vitoconnect_action {
 sub vitoconnect_errorHandling {
     my ($hash,$items) = @_;
     my $name          = $hash->{NAME};
+    my $gw            = AttrVal( $name, 'vitoconnect_serial', 0 );
     
     #Log3 $name, 1, "$name - errorHandling StatusCode: $items->{statusCode} ";
     
@@ -3713,6 +3716,13 @@ sub vitoconnect_errorHandling {
              . "errorType: " . ($items->{errorType} // 'undef') . " "
              . "message: " . ($items->{message} // 'undef') . " "
              . "error: " . ($items->{error} // 'undef');
+             
+            my $dir         = path( AttrVal("global","logdir","log"));
+            my $file        = $dir->child("vitoconnect_" . $gw . ".err");
+            my $file_handle = $file->openw_utf8();
+            $file_handle->print(Dumper($items));                            # Datei 'vitoconnect_serial.err' schreiben
+            Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
+             
             readingsSingleUpdate(
                $hash,
                "state",
@@ -3758,6 +3768,13 @@ sub vitoconnect_errorHandling {
                   . "errorType: $items->{errorType} "
                   . "message: $items->{message} "
                   . "error: $items->{error}";
+                  
+                my $dir         = path( AttrVal("global","logdir","log"));
+                my $file        = $dir->child("vitoconnect_" . $gw . ".err");
+                my $file_handle = $file->openw_utf8();
+                $file_handle->print(Dumper($items));                            # Datei 'vitoconnect_serial.err' schreiben
+                Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
+                
                 InternalTimer(gettimeofday() + $hash->{intervall},"vitoconnect_GetUpdate",$hash);
                 return(1);
             }
@@ -3838,13 +3855,15 @@ sub vitoconnect_ReadKeyValue {
 #####################################################################################################################
 # verschlüsselte Werte löschen
 #####################################################################################################################
-sub DeleteKeyValue {
-    my ($hash,$kName) = @_;     # Übergabe-Parameter
+sub vitoconnect_DeleteKeyValue {
+    my ($hash,$kName) = @_;    # Übergabe-Parameter
     my $name = $hash->{NAME};
 
     Log3( $name, 5,$name." - called function Delete()" );
 
-    my $index = $hash->{TYPE}."_".$hash->{NAME}."_".$kName;
+    my $index = $hash->{TYPE}."_".$hash->{NAME}."_passwd";
+    setKeyValue( $index, undef );
+    my $index = $hash->{TYPE}."_".$hash->{NAME}."_apiKey";
     setKeyValue( $index, undef );
 
     return;
