@@ -64,7 +64,9 @@ sub vitoconnect_getResource;            # API call for all Gateways
 sub vitoconnect_getResourceCallback;    # Get all API readings
 sub vitoconnect_getPowerLast;           # Write the power reading of the full last day to the DB
 
-sub vitoconnect_action;                 # 
+sub vitoconnect_action;                 # Send call to API
+
+sub vitoconnect_getErrorCode;           # Resolve Error code 
 
 sub vitoconnect_StoreKeyValue;          # Werte verschlüsselt speichern
 sub vitoconnect_ReadKeyValue;           # verschlüsselte Werte auslesen
@@ -84,6 +86,8 @@ use Path::Tiny;
 use DateTime;
 use Time::Piece;
 use Time::Seconds;
+use HTML::Entities;
+use HTML::Strip;
 
 eval "use FHEM::Meta;1"                   or my $modMetaAbsent = 1;                  ## no critic 'eval'
 use FHEM::SynoModules::SMUtils qw (
@@ -91,6 +95,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.7.5"  => "16.02.2025  Get mapped error codes and store them in readings",
   "0.7.4"  => "16.02.2025  Removed Unknow attr vitoconnect, small bugfix DeleteKeyValue",
   "0.7.3"  => "16.02.2025  Write *.err file in case of error. Fixed DeleteKeyValue thanks Schlimbo",
   "0.7.2"  => "07.02.2025  Attr logging improved",
@@ -125,6 +130,7 @@ my $callback_uri  = "http://localhost:4200/";
 my $apiURL        = "https://api.viessmann.com/iot/v1/equipment/";
 my $iotURL_V1     = "https://api.viessmann.com/iot/v1/equipment/";
 my $iotURL_V2     = "https://api.viessmann.com/iot/v2/features/";
+my $errorURL_V3   = "https://api.viessmann.com/service-documents/v3/error-database";
 
 my $RequestListMapping; # Über das Attribut Mapping definierte Readings zum überschreiben der RequestList
 my %translations;       # Über das Attribut translations definierte Readings zum überschreiben der RequestList
@@ -3566,6 +3572,14 @@ sub vitoconnect_getResourceCallback {
                  Log(5,$name.", -call setpower $Reading");
                  vitoconnect_getPowerLast ($hash,$name,$Reading);
                 }
+                
+                # Get error codes from API
+                if ($Reading eq "device.messages.errors.raw.entries") {
+                 Log(5,$name.", -call getErrorCode $Reading");
+                 if (defined $comma_separated_string && $comma_separated_string ne '') {
+                  vitoconnect_getErrorCode ($hash,$name,$comma_separated_string);
+                 }
+                }
             }
         }
 
@@ -3631,6 +3645,79 @@ sub vitoconnect_getPowerLast {
         }
     }
 
+    return;
+}
+
+
+#####################################################################################################################
+# Error Code auslesesn
+#####################################################################################################################
+sub vitoconnect_getErrorCode {
+    my ($hash, $name, $comma_separated_string) = @_;
+    #$comma_separated_string = "customer, c2, warning, 2025-02-03T17:25:19.000Z"; # debug
+
+    if (defined $comma_separated_string && $comma_separated_string ne '') {
+        my $serial = ReadingsVal($name, "device.serial.value", "");
+        my $materialNumber = substr($serial, 0, 7);
+        my @values = split(/, /, $comma_separated_string);
+        my $Reading = "device.messages.errors.mapped";
+
+        my $fault_counter = -1;
+        my $cause_counter = -1;
+
+        for (my $i = 0; $i < @values; $i += 4) {
+            my $errorCode = $values[$i + 1];
+
+            my $param = {
+                url => "https://api.viessmann.com/service-documents/v3/error-database?materialNumber=$materialNumber&errorCode=$errorCode&countryCode=EN&languageCode=en",
+                hash => $hash,
+                timeout => $hash->{timeout},  # Timeout von Internals = 15s
+                method => "GET",  # Methode auf GET ändern
+                sslargs => { SSL_verify_mode => 0 },
+            };
+            Log3($name, 3, $name . ", vitoconnect_getErrorCode url=" . $param->{url});
+
+            my ($err, $msg) = HttpUtils_BlockingGet($param);
+            my $decode_json = eval { decode_json($msg) };
+            Log3($name, 5, $name . ", vitoconnect_getErrorCode debug err=$err msg=" . $msg . " json=" . Dumper($decode_json));  # wieder weg
+
+            if (defined($err) && $err ne "") {   # Fehler bei Befehlsausführung
+                Log3($name, 1, $name . ", vitoconnect_getErrorCode call finished with error, err:" . $err);
+			} elsif (exists $decode_json->{statusCode} && $decode_json->{statusCode} ne "") {
+				Log3($name, 1, $name . ", vitoconnect_getErrorCode call finished with error, status code:" . $decode_json->{statusCode});
+            } else {   # Befehl korrekt ausgeführt
+                Log3($name, 3, $name . ", vitoconnect_getErrorCode: finished ok");
+                if (exists $decode_json->{faultCodes} && @{$decode_json->{faultCodes}}) {
+                    foreach my $fault (@{$decode_json->{faultCodes}}) {
+                        $fault_counter++;
+                        my $fault_code = $fault->{faultCode};
+                        my $system_characteristics = decode_entities($fault->{systemCharacteristics});
+                        my $hs = HTML::Strip->new();
+                        $system_characteristics = $hs->parse($system_characteristics);
+                        readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCode", $fault_code);
+                        readingsBulkUpdate($hash, $Reading . ".$fault_counter.systemCharacteristics", $system_characteristics);
+
+                        foreach my $cause (@{$fault->{causes}}) {
+                            $cause_counter++;
+                            my $cause_text = decode_entities($cause->{cause});
+                            my $measure = decode_entities($cause->{measure});
+
+                            # HTML-Tags entfernen
+                            $cause_text = $hs->parse($cause_text);
+                            $measure = $hs->parse($measure);
+
+                            readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCodes.$cause_counter.cause", $cause_text);
+                            readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCodes.$cause_counter.measure", $measure);
+                        }
+                    }
+                } else {
+                    Log3($name, 1, $name . ", vitoconnect_getErrorCode no faultcode in json found. json=" . Dumper($decode_json));
+                }
+            }
+        }
+    } else {
+        Log3($name, 1, $name . " , vitoconnect_getErrorCode the variable \$comma_separated_string does not exist or is empty");
+    }
     return;
 }
 
@@ -3718,12 +3805,6 @@ sub vitoconnect_errorHandling {
              . "errorType: " . ($items->{errorType} // 'undef') . " "
              . "message: " . ($items->{message} // 'undef') . " "
              . "error: " . ($items->{error} // 'undef');
-             
-            my $dir         = path( AttrVal("global","logdir","log"));
-            my $file        = $dir->child("vitoconnect_" . $gw . ".err");
-            my $file_handle = $file->openw_utf8();
-            $file_handle->print(Dumper($items));                            # Datei 'vitoconnect_serial.err' schreiben
-            Log3($name,3,$name." Datei: ".$dir."/".$file." geschrieben");
              
             readingsSingleUpdate(
                $hash,
