@@ -91,6 +91,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.7.4"  => "16.02.2025  Removed Unknow attr vitoconnect, small bugfix DeleteKeyValue",
   "0.7.3"  => "16.02.2025  Write *.err file in case of error. Fixed DeleteKeyValue thanks Schlimbo",
   "0.7.2"  => "07.02.2025  Attr logging improved",
   "0.7.1"  => "07.02.2025  Code cleanups",
@@ -2711,7 +2712,8 @@ sub vitoconnect_Attr {
         }
         else                                                {
             # return "Unknown attr $attr_name";
-            Log(1,$name.", ".$cmd ." Unknow attr vitoconnect_: ".($attr_name // 'undef')." value: ".($attr_value // 'undef'));
+            # This will return all attr, e.g. room. We do not want to see messages here.
+            # Log(1,$name.", ".$cmd ." Unknow attr vitoconnect_: ".($attr_name // 'undef')." value: ".($attr_value // 'undef'));
         }
     }
     elsif ($cmd eq "del") {
@@ -3863,7 +3865,7 @@ sub vitoconnect_DeleteKeyValue {
 
     my $index = $hash->{TYPE}."_".$hash->{NAME}."_passwd";
     setKeyValue( $index, undef );
-    my $index = $hash->{TYPE}."_".$hash->{NAME}."_apiKey";
+    $index = $hash->{TYPE}."_".$hash->{NAME}."_apiKey";
     setKeyValue( $index, undef );
 
     return;
