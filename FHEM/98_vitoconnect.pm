@@ -3682,8 +3682,8 @@ sub vitoconnect_getErrorCode {
 
             if (defined($err) && $err ne "") {   # Fehler bei Befehlsausführung
                 Log3($name, 1, $name . ", vitoconnect_getErrorCode call finished with error, err:" . $err);
-			} elsif (exists $decode_json->{statusCode} && $decode_json->{statusCode} ne "") {
-				Log3($name, 1, $name . ", vitoconnect_getErrorCode call finished with error, status code:" . $decode_json->{statusCode});
+            } elsif (exists $decode_json->{statusCode} && $decode_json->{statusCode} ne "") {
+                Log3($name, 1, $name . ", vitoconnect_getErrorCode call finished with error, status code:" . $decode_json->{statusCode});
             } else {   # Befehl korrekt ausgeführt
                 Log3($name, 3, $name . ", vitoconnect_getErrorCode: finished ok");
                 if (exists $decode_json->{faultCodes} && @{$decode_json->{faultCodes}}) {
@@ -3691,8 +3691,8 @@ sub vitoconnect_getErrorCode {
                         $fault_counter++;
                         my $fault_code = $fault->{faultCode};
                         my $system_characteristics = $fault->{systemCharacteristics};
-						# remove html paragraphs
-						$system_characteristics =~ s/<\/?p>//g;
+                        # remove html paragraphs
+                        $system_characteristics =~ s/<\/?p>//g;
                         readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCode", $fault_code);
                         readingsBulkUpdate($hash, $Reading . ".$fault_counter.systemCharacteristics", $system_characteristics);
 
@@ -3700,9 +3700,9 @@ sub vitoconnect_getErrorCode {
                             $cause_counter++;
                             my $cause_text = $cause->{cause};
                             my $measure = $cause->{measure};
-							# remove html paragraphs
-						    $cause_text =~ s/<\/?p>//g;
-						    $measure =~ s/<\/?p>//g;
+                            # remove html paragraphs
+                            $cause_text =~ s/<\/?p>//g;
+                            $measure =~ s/<\/?p>//g;
                             readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCodes.$cause_counter.cause", $cause_text);
                             readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCodes.$cause_counter.measure", $measure);
                         }
