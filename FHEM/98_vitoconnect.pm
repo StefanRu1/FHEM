@@ -86,8 +86,6 @@ use Path::Tiny;
 use DateTime;
 use Time::Piece;
 use Time::Seconds;
-use HTML::Entities;
-use HTML::Strip;
 
 eval "use FHEM::Meta;1"                   or my $modMetaAbsent = 1;                  ## no critic 'eval'
 use FHEM::SynoModules::SMUtils qw (
@@ -95,6 +93,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.7.6"  => "17.02.2025  removed usage of html libraries",
   "0.7.5"  => "16.02.2025  Get mapped error codes and store them in readings",
   "0.7.4"  => "16.02.2025  Removed Unknow attr vitoconnect, small bugfix DeleteKeyValue",
   "0.7.3"  => "16.02.2025  Write *.err file in case of error. Fixed DeleteKeyValue thanks Schlimbo",
@@ -3658,7 +3657,7 @@ sub vitoconnect_getErrorCode {
 
     if (defined $comma_separated_string && $comma_separated_string ne '') {
         my $serial = ReadingsVal($name, "device.serial.value", "");
-        my $materialNumber = substr($serial, 0, 7);
+        my $materialNumber = substr($serial, 0, 7); #"7733738"; #debug
         my @values = split(/, /, $comma_separated_string);
         my $Reading = "device.messages.errors.mapped";
 
@@ -3691,21 +3690,19 @@ sub vitoconnect_getErrorCode {
                     foreach my $fault (@{$decode_json->{faultCodes}}) {
                         $fault_counter++;
                         my $fault_code = $fault->{faultCode};
-                        my $system_characteristics = decode_entities($fault->{systemCharacteristics});
-                        my $hs = HTML::Strip->new();
-                        $system_characteristics = $hs->parse($system_characteristics);
+                        my $system_characteristics = $fault->{systemCharacteristics};
+						# remove html paragraphs
+						$system_characteristics =~ s/<\/?p>//g;
                         readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCode", $fault_code);
                         readingsBulkUpdate($hash, $Reading . ".$fault_counter.systemCharacteristics", $system_characteristics);
 
                         foreach my $cause (@{$fault->{causes}}) {
                             $cause_counter++;
-                            my $cause_text = decode_entities($cause->{cause});
-                            my $measure = decode_entities($cause->{measure});
-
-                            # HTML-Tags entfernen
-                            $cause_text = $hs->parse($cause_text);
-                            $measure = $hs->parse($measure);
-
+                            my $cause_text = $cause->{cause};
+                            my $measure = $cause->{measure};
+							# remove html paragraphs
+						    $cause_text =~ s/<\/?p>//g;
+						    $measure =~ s/<\/?p>//g;
                             readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCodes.$cause_counter.cause", $cause_text);
                             readingsBulkUpdate($hash, $Reading . ".$fault_counter.faultCodes.$cause_counter.measure", $measure);
                         }
