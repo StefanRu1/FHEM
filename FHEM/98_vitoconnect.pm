@@ -93,6 +93,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.9.0"  => "09.03.2025  New api and iam URL (viessmann-climatesolutions.com)",
   "0.8.7"  => "09.03.2025  Fix return value when using SVN or Roger",
   "0.8.6"  => "24.02.2025  Adapt schedule data before sending",
   "0.8.5"  => "24.02.2025  fix error when calling setter from FHEMWEB",
