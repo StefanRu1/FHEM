@@ -97,6 +97,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
+  "0.9.8"  => "28.11.2025  EOL from v1 API on 17.11.2025 changed to v2",
   "0.9.7"  => "02.11.2025  order of lists fixed",
   "0.9.6"  => "31.10.2025  One Base Message lists and translations",
   "0.9.5"  => "15.10.2025  Fix duplicate timer in case of password update (getCode)",
@@ -146,15 +147,15 @@ my %vNotesIntern = (
   "0.1.0"  => "12.12.2024  first release with Version. "
 );
 
-my $client_secret = "2e21faa1-db2c-4d0b-a10f-575fd372bc8c-575fd372bc8c";
-my $callback_uri  = "http://localhost:4200/";
-my $apiBaseURL    = "https://api.viessmann-climatesolutions.com";
-my $iamBaseURL    = "https://iam.viessmann-climatesolutions.com";
-my $iotURL_V1     = "$apiBaseURL/iot/v1/equipment/";
-my $iotURL_V2     = "$apiBaseURL/iot/v2/features/";
-my $authorizeURL  = "$iamBaseURL/idp/v2/authorize";
-my $tokenURL      = "$iamBaseURL/idp/v2/token";
-my $errorURL_V3   = "$apiBaseURL/service-documents/v3/error-database";
+my $client_secret   = "2e21faa1-db2c-4d0b-a10f-575fd372bc8c-575fd372bc8c";
+my $callback_uri    = "http://localhost:4200/";
+my $apiBaseURL      = "https://api.viessmann-climatesolutions.com";
+my $iamBaseURL      = "https://iam.viessmann-climatesolutions.com";
+my $equipmentURL_V2 = "$apiBaseURL/iot/v2/equipment/";
+my $iotURL_V2       = "$apiBaseURL/iot/v2/features/";
+my $authorizeURL    = "$iamBaseURL/idp/v2/authorize";
+my $tokenURL        = "$iamBaseURL/idp/v2/token";
+my $errorURL_V3     = "$apiBaseURL/service-documents/v3/error-database";
 
 my $RequestListMapping; # Über das Attribut Mapping definierte Readings zum überschreiben der RequestList
 my %translations;       # Über das Attribut translations definierte Readings zum überschreiben der RequestList
@@ -3423,7 +3424,7 @@ sub vitoconnect_getGw {
     my $name         = $hash->{NAME};
     my $access_token = $hash->{".access_token"};
     my $param        = {
-        url      => $iotURL_V1
+        url      => $equipmentURL_V2
         ."gateways",
         hash     => $hash,
         header   => "Authorization: Bearer ".$access_token,
@@ -3555,7 +3556,7 @@ sub vitoconnect_getInstallation {
     my $name         = $hash->{NAME};
     my $access_token = $hash->{".access_token"};
     my $param        = {
-        url      => $iotURL_V1
+        url      => $equipmentURL_V2
         ."installations",
         hash     => $hash,
         header   => "Authorization: Bearer ".$access_token,
@@ -3687,7 +3688,7 @@ sub vitoconnect_getDevice {
     Log(5,$name.", --getDevice gw for call set: ".$gw);
 
     my $param        = {
-        url     => $iotURL_V1
+        url     => $equipmentURL_V2
         ."installations/".$installation."/gateways/".$gw."/devices",
         hash    => $hash,
         header  => "Authorization: Bearer ".$access_token,
