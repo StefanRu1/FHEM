@@ -1,0 +1,30 @@
+/* Schriftart einbinden – immer global */
+@font-face {
+  font-family: 'Lato';
+  font-style: normal;
+  src: local('Lato Light'), local('Lato-Light'),
+       url(https://fonts.gstatic.com/s/lato/v14/S6u9w4BMUTPHh7USSwiPGQ3q5d0.woff2) format('woff2');
+}
+
+/* vitoconnect-Bereich */
+[data-type="vitoconnect"] {
+  font-family: 'Lato';
+  font-size: 13px;
+
+  /* Weiß, aber semi-transparent */
+  background-color: rgba(255,255,255,0.70) !important;
+
+  /* Wichtig: Block-Layout erzwingen, verhindert Layout-Verschiebungen */
+  display: block;
+}
+
+/* SVG skalieren */
+[data-type="vitoconnect"] svg { 
+  width: 100% !important; 
+  height: 100% !important; 
+}
+
+/* Nur innere harte Hintergründe entfernen – NICHT den Hauptcontainer */
+[data-type="vitoconnect"] > * {
+  background-color: transparent !important;
+}
