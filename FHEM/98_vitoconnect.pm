@@ -26,7 +26,7 @@
 #   https://www.viessmann-community.com/t5/Getting-started-programming-with/Syntax-for-setting-a-value/td-p/374222
 #   https://forum.fhem.de/index.php?msg=1326376
 
-sub vitoconnect_Initialize;             # Modul initialisieren und Namen zusätzlicher Funktionen bekannt geben 
+sub vitoconnect_Initialize;             # Modul initialisieren und Namen zusätzlicher Funktionen bekannt geben
 sub vitoconnect_Define;                 # wird beim 'define' eines Gerätes aufgerufen
 sub vitoconnect_Undef;                  # wird beim Löschen einer Geräteinstanz aufgerufen
 sub vitoconnect_Get;                    # Implementierung get-Befehle
