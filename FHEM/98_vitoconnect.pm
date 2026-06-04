@@ -1,39 +1,5 @@
 #########################################################################
 # $Id: 98_vitoconnect.pm 31188 2026-05-05 22:41:00Z stefanru $
-#
-# 98_vitoconnect_rb.pm – Korrigierte Version (Fork) von 98_vitoconnect.pm
-# Autor der Korrekturen: R. Bergmann, 2026-06-04
-#
-# Behobene Bugs gegenüber Original v1.1.2 (SVN 31188):
-#
-#   [RB-FIX-01] Parsing-Bug in vitoconnect_getErrorCode:
-#               Schleifenschrittweite war 4, muss 6 sein.
-#               Jeder Eintrag in *.raw.entries hat 6 Felder:
-#               source, count, bus, code, category, timestamp
-#               Beispiel: "customer, 1, OwnBus, S.134, status, 2026-06-04T06:40:54.000Z"
-#               Durch die falsche Schrittweite wurden Timestamps als Codes und
-#               echte Codes als Timestamps behandelt – alle API-Calls lieferten 404.
-#               Zusätzlich: syntaktisch ungültige Codes (reine Zahlen, ISO-Timestamps,
-#               Bus-Namen) werden jetzt vor dem API-Call herausgefiltert.
-#
-#   [RB-FIX-02] FHEM-Freeze durch HttpUtils_BlockingGet im Non-Blocking-Callback:
-#               vitoconnect_getErrorCode wird aus vitoconnect_getResourceCallback
-#               aufgerufen (Non-Blocking-Kontext). Der darin enthaltene
-#               HttpUtils_BlockingGet blockierte den FHEM-Eventloop
-#               typisch 5+ Sekunden pro Update-Zyklus (ca. ~300ms x 17 Calls).
-#               Fix: Modul-globaler Cache %vitoconnect_errorcode_cache.
-#               Bekannte Codes werden sofort aus dem Cache bedient (0ms).
-#               Unbekannte Codes werden zuerst in der lokalen Tabelle gesucht.
-#               Nur wenn dort kein Treffer: einmaliger BlockingGet-Aufruf,
-#               dessen Ergebnis dauerhaft im Cache bleibt. Im Normalbetrieb
-#               nach dem ersten Update-Zyklus finden keine blockierenden
-#               HTTP-Calls mehr statt.
-#
-#   [RB-FIX-03] Toter Code entfernt: $hash->{ReadFn} = \&vitoconnect_Read
-#               in vitoconnect_Initialize. Die Funktion vitoconnect_Read
-#               existiert nicht. ReadFn wird nur für Geräte mit Filehandle
-#               (serielle/Socket-Verbindung) benötigt, nicht für HTTP-Module.
-#
 # fhem Modul für Viessmann API. Based on investigation of "thetrueavatar"
 # (https://github.com/thetrueavatar/Viessmann-Api)
 #
@@ -135,8 +101,8 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
-  # [RB-FIX-01/02/03] Bugfix-Fork von v1.1.2 durch R. Bergmann
-  "1.1.2.1" => "04.06.2026  [RB-FIX-01] Parsing-Stride 4->6 in getErrorCode korrigiert; [RB-FIX-02] BlockingGet-Cache verhindert FHEM-Freeze; [RB-FIX-03] ReadFn toter Code entfernt",
+  # [RB-FIX-01/02/03] Bugfix-Fork von v1.1.3 durch R. Bergmann
+  "1.1.3" => "04.06.2026  [RB-FIX-01] Parsing-Stride 4->6 in getErrorCode korrigiert; [RB-FIX-02] BlockingGet-Cache verhindert FHEM-Freeze; [RB-FIX-03] ReadFn toter Code entfernt",
   "1.1.2"  => "04.05.2026  Fix schedule setter: support both API format and reading format, stop retry on VALIDATION_ERROR",
   "1.1.1"  => "25.02.2026  Small fixes",
   "1.1.0"  => "24.02.2026  Small adaptions to SVG",
