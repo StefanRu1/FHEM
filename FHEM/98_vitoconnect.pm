@@ -101,8 +101,7 @@ use FHEM::SynoModules::SMUtils qw (
                                   );                                                 # Hilfsroutinen Modul
 
 my %vNotesIntern = (
-  # [RB-FIX-01/02/03] Bugfix-Fork von v1.1.3 durch R. Bergmann
-  "1.1.3" => "04.06.2026  [RB-FIX-01] Parsing-Stride 4->6 in getErrorCode korrigiert; [RB-FIX-02] BlockingGet-Cache verhindert FHEM-Freeze; [RB-FIX-03] ReadFn toter Code entfernt",
+  "1.1.3"  => "04.06.2026  Bugfix-Fork von v1.1.3 durch R. Bergmann [RB-FIX-01] Parsing-Stride 4->6 in getErrorCode korrigiert; [RB-FIX-02] BlockingGet-Cache verhindert FHEM-Freeze; [RB-FIX-03] ReadFn toter Code entfernt",
   "1.1.2"  => "04.05.2026  Fix schedule setter: support both API format and reading format, stop retry on VALIDATION_ERROR",
   "1.1.1"  => "25.02.2026  Small fixes",
   "1.1.0"  => "24.02.2026  Small adaptions to SVG",
